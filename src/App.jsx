@@ -52,22 +52,24 @@ import {
  * - Firestore Real-time Sync
  */
 
-// --- 0. Firebase Setup ---
+// --- 0. Firebase Setup (Production) ---
 let app, auth, db, provider;
-let appId = 'neuroflow-default';
+let appId = 'neuroflow-prod'; 
 
 try {
-    if (typeof __firebase_config !== 'undefined') {
-        const firebaseConfig = JSON.parse(__firebase_config);
+    // Vercel/Vite exposes env vars via import.meta.env
+    const configRaw = import.meta.env.VITE_FIREBASE_CONFIG;
+
+    if (configRaw) {
+        const firebaseConfig = JSON.parse(configRaw);
         app = initializeApp(firebaseConfig);
         auth = getAuth(app);
         db = getFirestore(app);
         provider = new GoogleAuthProvider();
+        // CORRECTED LINE: Clean URL string (No markdown syntax)
         provider.addScope('https://www.googleapis.com/auth/calendar.events');
-        
-        if (typeof __app_id !== 'undefined') {
-            appId = __app_id;
-        }
+    } else {
+        console.warn("VITE_FIREBASE_CONFIG is missing. Auth will fail.");
     }
 } catch (e) {
     console.error("Firebase init failed:", e);
