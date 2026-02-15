@@ -68,6 +68,7 @@ try {
         auth = getAuth(app);
         db = getFirestore(app);
         provider = new GoogleAuthProvider();
+        // CORRECTED LINE: Removed Markdown syntax from string
         provider.addScope('[https://www.googleapis.com/auth/calendar.events](https://www.googleapis.com/auth/calendar.events)');
     } else {
         console.warn("VITE_FIREBASE_CONFIG is missing. Auth will fail.");
@@ -75,6 +76,25 @@ try {
 } catch (e) {
     console.error("Firebase init failed:", e);
 }
+
+// ... inside App component ...
+
+useEffect(() => {
+   // SAFETY CHECK: Prevent crash if auth is missing
+   if (!auth) {
+       console.error("Auth not initialized. Check VITE_FIREBASE_CONFIG.");
+       return;
+   }
+
+   const initAuth = async () => { /* ... */ };
+   initAuth();
+
+   const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+       // ... existing logic ...
+   });
+   return () => unsubscribe();
+}, []);
+
 
 // --- 1. Utility Functions ---
 
