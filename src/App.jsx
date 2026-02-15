@@ -23,7 +23,8 @@ import {
   Sun,
   Cloud,
   LogOut,
-  CalendarCheck
+  CalendarCheck,
+  MoreHorizontal
 } from 'lucide-react';
 
 // --- Firebase Imports ---
@@ -34,50 +35,43 @@ import {
   GoogleAuthProvider, 
   signOut, 
   onAuthStateChanged,
-  signInWithCustomToken,
-  signInAnonymously
+  signInWithCustomToken
 } from "firebase/auth";
 import { 
   getFirestore, 
   doc, 
   setDoc, 
-  onSnapshot, 
-  collection 
+  onSnapshot
 } from "firebase/firestore";
 
 /**
- * NeuroFlow Week Planner - Cloud Sync & Calendar Edition
+ * NeuroFlow Week Planner - Fixed Version
  * Features: 
+ * - Inline Inputs & Dropdowns
  * - Google Sign-In & Calendar OAuth
- * - Firestore Real-time Sync (Multi-device)
- * - FreeMind Layout Engine
+ * - Firestore Real-time Sync
  */
 
 // --- 0. Firebase Setup ---
-// We try to grab config from the environment, or handle the case where it's missing gracefully.
 let app, auth, db, provider;
-let appId = 'neuroflow-prod'; 
+let appId = 'neuroflow-default';
 
 try {
-    // Vercel/Vite exposes env vars via import.meta.env
-    const configRaw = import.meta.env.VITE_FIREBASE_CONFIG;
-
-    if (configRaw) {
-        const firebaseConfig = JSON.parse(configRaw);
+    if (typeof __firebase_config !== 'undefined') {
+        const firebaseConfig = JSON.parse(__firebase_config);
         app = initializeApp(firebaseConfig);
         auth = getAuth(app);
         db = getFirestore(app);
         provider = new GoogleAuthProvider();
-        // CORRECTED LINE: Removed Markdown syntax from string
-        provider.addScope('[https://www.googleapis.com/auth/calendar.events](https://www.googleapis.com/auth/calendar.events)');
-    } else {
-        console.warn("VITE_FIREBASE_CONFIG is missing. Auth will fail.");
+        provider.addScope('https://www.googleapis.com/auth/calendar.events');
+        
+        if (typeof __app_id !== 'undefined') {
+            appId = __app_id;
+        }
     }
 } catch (e) {
     console.error("Firebase init failed:", e);
 }
-
-
 
 // --- 1. Utility Functions ---
 
@@ -182,8 +176,7 @@ const TreeStyles = ({ isDarkMode }) => {
 
 // --- 5. Components ---
 
-// Inspector Panel with Calendar Integration
-const InspectorPanel = ({ node, onUpdate, onAddChild, onDelete, isDarkMode, clients, onExportCalendar }) => {
+const InspectorPanel = ({ node, onUpdate, onDelete, isDarkMode, clients, onExportCalendar, onClose }) => {
     if (!node) return null;
     const client = clients.find(c => c.id === node.clientId);
     const isClient = node.type === 'client';
@@ -192,36 +185,27 @@ const InspectorPanel = ({ node, onUpdate, onAddChild, onDelete, isDarkMode, clie
         <div className={`fixed right-0 top-0 h-full w-80 shadow-2xl border-l z-[60] transform transition-transform duration-300 ${isDarkMode ? 'bg-stone-900 border-stone-800' : 'bg-white border-stone-200'}`}>
             <div className={`p-4 border-b flex justify-between items-center ${isDarkMode ? 'border-stone-800' : 'border-stone-100'}`}>
                 <h3 className={`font-bold ${isDarkMode ? 'text-stone-200' : 'text-stone-800'}`}>{isClient ? 'Client Details' : 'Task Details'}</h3>
-                <button onClick={() => onUpdate(null)} className={isDarkMode ? 'text-stone-500 hover:text-stone-300' : 'text-stone-400 hover:text-stone-600'}><X size={18}/></button>
+                <button onClick={onClose} className={isDarkMode ? 'text-stone-500 hover:text-stone-300' : 'text-stone-400 hover:text-stone-600'}><X size={18}/></button>
             </div>
             
             <div className="p-6 space-y-6">
                 <div>
-                    <label className={`text-xs font-bold uppercase block mb-1 ${isDarkMode ? 'text-stone-500' : 'text-stone-400'}`}>Label</label>
-                    <input 
-                        type="text" 
-                        value={node.text} 
-                        onChange={(e) => onUpdate(node.id, { text: e.target.value })}
-                        className={`w-full border rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-teal-500 ${isDarkMode ? 'bg-stone-800 border-stone-700 text-stone-100' : 'bg-white border-stone-200'}`}
-                    />
+                    <label className={`text-xs font-bold uppercase block mb-1 ${isDarkMode ? 'text-stone-500' : 'text-stone-400'}`}>Total Duration</label>
+                    <div className={`p-3 rounded-lg border font-mono text-lg font-bold ${isDarkMode ? 'bg-stone-800 border-stone-700 text-stone-200' : 'bg-stone-50 border-stone-200 text-stone-800'}`}>
+                        {formatTime(node.timeSpent)}
+                    </div>
                 </div>
 
                 {!isClient && (
-                    <>
-                        <div className={`p-4 rounded-xl border ${isDarkMode ? 'bg-stone-800 border-stone-700' : 'bg-stone-50 border-stone-200'}`}>
-                            <div className="flex justify-between items-center mb-2">
-                                <span className={`text-xs font-bold uppercase ${isDarkMode ? 'text-stone-500' : 'text-stone-400'}`}>Total Duration</span>
-                                <span className={`font-mono font-bold ${isDarkMode ? 'text-stone-200' : 'text-stone-800'}`}>{formatTime(node.timeSpent)}</span>
-                            </div>
-                            <button 
-                                onClick={() => onExportCalendar(node)}
-                                className="w-full flex items-center justify-center gap-2 py-2 mt-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition-colors"
-                            >
-                                <CalendarCheck size={14} /> Push to Calendar
-                            </button>
-                            <p className="text-[10px] text-center mt-2 text-stone-500">Creates a 1hr event (or duration) on GCal</p>
-                        </div>
-                    </>
+                    <div className={`p-4 rounded-xl border ${isDarkMode ? 'bg-stone-800 border-stone-700' : 'bg-stone-50 border-stone-200'}`}>
+                        <button 
+                            onClick={() => onExportCalendar(node)}
+                            className="w-full flex items-center justify-center gap-2 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition-colors"
+                        >
+                            <CalendarCheck size={14} /> Push to Calendar
+                        </button>
+                        <p className="text-[10px] text-center mt-2 text-stone-500">Creates a 1hr event (or duration) on GCal</p>
+                    </div>
                 )}
 
                 <div className="pt-4 border-t border-stone-200/10">
@@ -434,39 +418,50 @@ const Timer = ({ isRunning, timeSpent, onToggle, isDarkMode }) => (
     </button>
 );
 
-const TaskNode = ({ node, onUpdate, onAddChild, onTimerToggle, activeTimers, direction, isDarkMode, onInspect }) => {
+const TaskNode = ({ node, onUpdate, onAddChild, onDelete, onTimerToggle, activeTimers, direction, isDarkMode, onInspect }) => {
     if (!node) return null;
     const isRunning = activeTimers.includes(node.id);
     const baseCard = isDarkMode ? 'bg-stone-800 border-stone-700 shadow-stone-900/20' : 'bg-stone-50 border-stone-300 shadow-sm';
+    const focusRing = 'focus-within:ring-2 focus-within:ring-teal-500 focus-within:border-transparent';
+    const inputColor = isDarkMode ? 'text-stone-200 placeholder-stone-600' : 'text-stone-800 placeholder-stone-400';
+    const completedText = isDarkMode ? 'line-through text-stone-600' : 'line-through text-stone-400';
     
     return (
         <div className={`mm-child-${direction}`}>
             <div 
-                onClick={(e) => { e.stopPropagation(); onInspect(node); }}
-                className={`flex flex-col gap-1 p-3 rounded-xl border shadow-sm relative z-20 shrink-0 w-52 transition-all cursor-pointer hover:ring-2 hover:ring-teal-500/50 ${node.completed ? 'opacity-60 grayscale' : ''} ${baseCard}`}
+                className={`flex flex-col gap-1 p-3 rounded-xl border shadow-sm relative z-20 shrink-0 w-56 transition-all ${focusRing} ${node.completed ? 'opacity-60 grayscale' : ''} ${baseCard}`}
             >
                 <div className="flex w-full items-center gap-2">
-                    <button onClick={(e) => { e.stopPropagation(); onUpdate(node.id, { completed: !node.completed }); }} className={`w-5 h-5 flex-shrink-0 rounded-md border flex items-center justify-center transition-colors ${node.completed ? 'bg-teal-600 border-teal-600 text-white' : 'border-stone-400 bg-transparent'}`}>
+                    <button onClick={(e) => { e.stopPropagation(); onUpdate(node.id, { completed: !node.completed }); }} className={`w-5 h-5 flex-shrink-0 rounded-md border flex items-center justify-center transition-colors ${node.completed ? 'bg-teal-600 border-teal-600 text-white' : 'border-stone-400 bg-transparent hover:border-teal-500'}`}>
                         {node.completed && <Check size={12} strokeWidth={4} />}
                     </button>
-                    <span className={`flex-1 text-sm font-semibold truncate ${isDarkMode ? 'text-stone-200' : 'text-stone-800'}`}>{node.text || 'Untitled'}</span>
+                    {/* Inline Input for Task Title */}
+                    <input 
+                        type="text" 
+                        value={node.text} 
+                        onChange={(e) => onUpdate(node.id, { text: e.target.value })} 
+                        className={`bg-transparent outline-none flex-1 text-sm font-semibold ${node.completed ? completedText : inputColor}`} 
+                        placeholder="Task..." 
+                    />
                 </div>
                 <div className={`flex items-center justify-between w-full pt-2 border-t mt-1 ${isDarkMode ? 'border-stone-700' : 'border-stone-200/60'}`}>
                     <Timer isRunning={isRunning} timeSpent={node.timeSpent} onToggle={() => onTimerToggle(node.id)} isDarkMode={isDarkMode} />
                     <div className="flex items-center gap-1">
+                        <button onClick={(e) => { e.stopPropagation(); onInspect(node); }} className="p-1 text-stone-400 hover:bg-stone-200/10 rounded-md hover:text-indigo-500" title="Details & Calendar"><Calendar size={14}/></button>
                         <button onClick={(e) => { e.stopPropagation(); onAddChild(node.id); }} className="p-1 text-teal-600 hover:bg-teal-500/10 rounded-md"><Plus size={16}/></button>
                         {node.children && node.children.length > 0 && (
                             <button onClick={(e) => { e.stopPropagation(); onUpdate(node.id, { expanded: !node.expanded }); }} className="p-1 text-stone-500 hover:bg-stone-200/10 rounded-md">
                                 {node.expanded ? <ChevronDown size={16}/> : (direction === 'left' ? <ChevronLeft size={16}/> : <ChevronRight size={16}/>)}
                             </button>
                         )}
+                        <button onClick={(e) => { e.stopPropagation(); onDelete(node.id); }} className="p-1 text-stone-400 hover:bg-rose-500/10 rounded-md hover:text-rose-500"><Trash2 size={16}/></button>
                     </div>
                 </div>
             </div>
             {node.expanded && node.children && node.children.length > 0 && (
                 <div className={`mm-children-${direction}`}>
                     {node.children.map(child => (
-                        <TaskNode key={child.id} node={child} onUpdate={onUpdate} onAddChild={onAddChild} onTimerToggle={onTimerToggle} activeTimers={activeTimers} direction={direction} isDarkMode={isDarkMode} onInspect={onInspect} />
+                        <TaskNode key={child.id} node={child} onUpdate={onUpdate} onAddChild={onAddChild} onDelete={onDelete} onTimerToggle={onTimerToggle} activeTimers={activeTimers} direction={direction} isDarkMode={isDarkMode} onInspect={onInspect} />
                     ))}
                 </div>
             )}
@@ -474,16 +469,31 @@ const TaskNode = ({ node, onUpdate, onAddChild, onTimerToggle, activeTimers, dir
     );
 };
 
-const ClientNode = ({ node, direction, clients, onUpdate, onAddChild, onTimerToggle, activeTimers, openClientManager, isDarkMode, onInspect }) => {
+const ClientNode = ({ node, direction, clients, onUpdate, onAddChild, onDelete, onTimerToggle, activeTimers, openClientManager, isDarkMode, onInspect }) => {
     if (!node) return null;
     const client = (clients && clients.length > 0) ? (clients.find(c => c.id === node.clientId) || clients[0]) : { color: 'stone' };
     const themeClass = getThemeClasses(client.color, isDarkMode);
 
+    const handleClientChange = (e) => {
+        if (e.target.value === 'ADD_NEW') openClientManager();
+        else onUpdate(node.id, { clientId: e.target.value });
+    };
+
     return (
         <div className={`mm-child-${direction}`}>
-            <div className={`relative z-20 px-4 py-2.5 rounded-full shadow-md border-2 flex items-center gap-2 transition-all hover:scale-[1.02] shrink-0 min-w-[170px] cursor-pointer ${themeClass}`} onClick={() => onInspect(node)}>
+            <div className={`relative z-20 px-4 py-2.5 rounded-full shadow-md border-2 flex items-center gap-2 transition-all hover:scale-[1.02] shrink-0 min-w-[170px] ${themeClass}`}>
                 <Briefcase size={18} className="opacity-80 flex-shrink-0" />
-                <span className="font-bold text-sm truncate flex-1 text-center">{client.name}</span>
+                {/* Dropdown for Client Selection */}
+                <select 
+                    value={node.clientId} 
+                    onChange={handleClientChange} 
+                    className="bg-transparent font-bold text-sm outline-none cursor-pointer appearance-none truncate flex-1 text-center"
+                >
+                    {clients && clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    <option disabled>──────────</option>
+                    <option value="ADD_NEW">+ Add New...</option>
+                </select>
+                
                 <div className="flex gap-1 border-l pl-2 border-current/20">
                     <button onClick={(e) => { e.stopPropagation(); onAddChild(node.id); }} className="opacity-60 hover:opacity-100"><Plus size={16}/></button>
                     {node.children && node.children.length > 0 && (
@@ -491,12 +501,13 @@ const ClientNode = ({ node, direction, clients, onUpdate, onAddChild, onTimerTog
                             {node.expanded ? <ChevronDown size={16}/> : (direction === 'left' ? <ChevronLeft size={16}/> : <ChevronRight size={16}/>)}
                         </button>
                     )}
+                    <button onClick={(e) => { e.stopPropagation(); onDelete(node.id); }} className="opacity-60 hover:opacity-100"><Trash2 size={16}/></button>
                 </div>
             </div>
             {node.expanded && node.children && node.children.length > 0 && (
                 <div className={`mm-children-${direction}`}>
                     {node.children.map(child => (
-                        <TaskNode key={child.id} node={child} onUpdate={onUpdate} onAddChild={onAddChild} onTimerToggle={onTimerToggle} activeTimers={activeTimers} direction={direction} isDarkMode={isDarkMode} onInspect={onInspect} />
+                        <TaskNode key={child.id} node={child} onUpdate={onUpdate} onAddChild={onAddChild} onDelete={onDelete} onTimerToggle={onTimerToggle} activeTimers={activeTimers} direction={direction} isDarkMode={isDarkMode} onInspect={onInspect} />
                     ))}
                 </div>
             )}
@@ -516,30 +527,30 @@ const NeuroFlowApp = () => {
   const [data, setData] = useState(INITIAL_DATA);
   const [clients, setClients] = useState(INITIAL_CLIENTS);
   const [activeTimers, setActiveTimers] = useState([]);
+  
+  // UI State
   const [showClientManager, setShowClientManager] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
   const [inspectedNode, setInspectedNode] = useState(null);
   const [view, setView] = useState({ x: 0, y: 0, scale: 0.8 }); 
   const [isDragging, setIsDragging] = useState(false);
   const [lastMouse, setLastMouse] = useState({ x: 0, y: 0 });
+  const [deleteTarget, setDeleteTarget] = useState(null);
 
   const timerRef = useRef(null);
 
   // --- Auth & Data Loading ---
   
   useEffect(() => {
-    // SAFETY CHECK: Prevent crash if auth is missing
-      if (!auth) {
+        // SAFETY CHECK: Prevent crash if auth is missing
+        if (!auth) {
           console.error("Auth not initialized. Check VITE_FIREBASE_CONFIG.");
           return;
-      }
+        };
       // 1. Init Auth
       const initAuth = async () => {
           if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
               await signInWithCustomToken(auth, __initial_auth_token);
-          } else {
-              // Fallback if no specific token (though environment usually provides one)
-              // We don't force anon sign in if the user might want to sign in with Google
           }
       };
       initAuth();
@@ -689,17 +700,13 @@ const NeuroFlowApp = () => {
   };
 
   const updateNode = (id, updates) => {
-    // If id is null, we are updating nothing (closing inspector usually)
     if (id === null) {
         setInspectedNode(null);
         return;
     }
-    
-    // Update inspected node state locally if it matches
     if (inspectedNode && inspectedNode.id === id) {
         setInspectedNode(prev => ({ ...prev, ...updates }));
     }
-
     const updateRecursive = (nodes) => nodes.map(node => {
         if (node.id === id) return { ...node, ...updates };
         if (node.children) return { ...node, children: updateRecursive(node.children) };
@@ -728,11 +735,16 @@ const NeuroFlowApp = () => {
   };
 
   const deleteNode = (id) => {
-    if(!window.confirm("Delete?")) return;
-    const deleteRecursive = (nodes) => nodes.filter(node => node.id !== id).map(node => ({
+    setDeleteTarget(id);
+  };
+
+  const confirmDelete = () => {
+    if (!deleteTarget) return;
+    const deleteRecursive = (nodes) => nodes.filter(node => node.id !== deleteTarget).map(node => ({
         ...node, children: node.children ? deleteRecursive(node.children) : []
     }));
     setData(prev => ({ ...prev, tasks: deleteRecursive(prev.tasks || []) }));
+    setDeleteTarget(null);
     setInspectedNode(null);
   };
 
@@ -842,7 +854,20 @@ const NeuroFlowApp = () => {
 
       <ClientManagerModal isOpen={showClientManager} onClose={() => setShowClientManager(false)} clients={clients} setClients={setClients} isDarkMode={isDarkMode} />
       <ReportModal isOpen={showReportModal} onClose={() => setShowReportModal(false)} data={data} clients={clients} isDarkMode={isDarkMode} />
-      {inspectedNode && <InspectorPanel node={inspectedNode} onUpdate={updateNode} onAddChild={addChild} onDelete={deleteNode} isDarkMode={isDarkMode} clients={clients} onExportCalendar={exportToCalendar} />}
+      {inspectedNode && <InspectorPanel node={inspectedNode} onUpdate={updateNode} onDelete={deleteNode} isDarkMode={isDarkMode} clients={clients} onExportCalendar={exportToCalendar} onClose={() => setInspectedNode(null)} />}
+      
+      {deleteTarget && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
+           <div className={`rounded-xl p-6 max-w-sm w-full shadow-2xl ${isDarkMode ? 'bg-stone-900 border border-stone-800' : 'bg-white'}`}>
+              <h3 className={`font-bold text-lg mb-2 ${isDarkMode ? 'text-stone-200' : 'text-stone-800'}`}>Delete Branch?</h3>
+              <p className={`mb-6 text-sm ${isDarkMode ? 'text-stone-400' : 'text-stone-600'}`}>This will permanently delete this item and all its sub-tasks. This cannot be undone.</p>
+              <div className="flex justify-end gap-3">
+                 <button onClick={() => setDeleteTarget(null)} className={`px-4 py-2 rounded-lg ${isDarkMode ? 'text-stone-400 hover:bg-stone-800' : 'text-stone-600 hover:bg-stone-100'}`}>Cancel</button>
+                 <button onClick={confirmDelete} className="px-4 py-2 bg-rose-600 text-white rounded-lg hover:bg-rose-700">Delete</button>
+              </div>
+           </div>
+        </div>
+      )}
     </div>
   );
 }
