@@ -56,7 +56,7 @@ import {
 // --- 0. Firebase Setup ---
 // We try to grab config from the environment, or handle the case where it's missing gracefully.
 let app, auth, db, provider;
-let appId = 'neuroflow-prod';
+let appId = 'neuroflow-prod'; 
 
 try {
     // Vercel/Vite exposes env vars via import.meta.env
@@ -77,23 +77,6 @@ try {
     console.error("Firebase init failed:", e);
 }
 
-// ... inside App component ...
-
-useEffect(() => {
-   // SAFETY CHECK: Prevent crash if auth is missing
-   if (!auth) {
-       console.error("Auth not initialized. Check VITE_FIREBASE_CONFIG.");
-       return;
-   }
-
-   const initAuth = async () => { /* ... */ };
-   initAuth();
-
-   const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-       // ... existing logic ...
-   });
-   return () => unsubscribe();
-}, []);
 
 
 // --- 1. Utility Functions ---
@@ -545,6 +528,11 @@ const NeuroFlowApp = () => {
   // --- Auth & Data Loading ---
   
   useEffect(() => {
+    // SAFETY CHECK: Prevent crash if auth is missing
+      if (!auth) {
+          console.error("Auth not initialized. Check VITE_FIREBASE_CONFIG.");
+          return;
+      }
       // 1. Init Auth
       const initAuth = async () => {
           if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
