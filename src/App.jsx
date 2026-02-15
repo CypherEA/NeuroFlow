@@ -24,7 +24,9 @@ import {
   Cloud,
   LogOut,
   CalendarCheck,
-  MoreHorizontal
+  MoreHorizontal,
+  Upload,
+  BrainCircuit
 } from 'lucide-react';
 
 // --- Firebase Imports ---
@@ -45,14 +47,11 @@ import {
 } from "firebase/firestore";
 
 /**
- * NeuroFlow Week Planner - Fixed Version
- * Features: 
- * - Inline Inputs & Dropdowns
- * - Google Sign-In & Calendar OAuth
- * - Firestore Real-time Sync
+ * NeuroFlow Week Planner - V4.2 (Robust Async Handling)
+ * Fixes: Wrapped async useEffects in try/catch to prevent 'unhandledrejection'
  */
 
-// --- 0. Firebase Setup (Production) ---
+// --- 0. Firebase Setup ---
 let app, auth, db, provider;
 let appId = 'neuroflow-prod'; 
 
@@ -68,14 +67,64 @@ try {
         provider = new GoogleAuthProvider();
         // CORRECTED LINE: Clean URL string (No markdown syntax)
         provider.addScope('https://www.googleapis.com/auth/calendar.events');
-    } else {
+         } else {
         console.warn("VITE_FIREBASE_CONFIG is missing. Auth will fail.");
     }
 } catch (e) {
     console.error("Firebase init failed:", e);
 }
 
-// --- 1. Utility Functions ---
+// --- 1. Theme & Color System ---
+
+const THEME_COLORS = {
+    stone: { 
+        light: 'bg-stone-200 border-stone-300 text-stone-800', 
+        dark: 'bg-stone-800 border-stone-600 text-stone-200',
+        preview: 'bg-stone-200'
+    },
+    teal: { 
+        light: 'bg-teal-100 border-teal-300 text-teal-900', 
+        dark: 'bg-teal-900/40 border-teal-700 text-teal-100',
+        preview: 'bg-teal-400'
+    },
+    indigo: { 
+        light: 'bg-indigo-100 border-indigo-300 text-indigo-900', 
+        dark: 'bg-indigo-900/40 border-indigo-700 text-indigo-100',
+        preview: 'bg-indigo-400'
+    },
+    rose: { 
+        light: 'bg-rose-100 border-rose-300 text-rose-900', 
+        dark: 'bg-rose-900/40 border-rose-700 text-rose-100',
+        preview: 'bg-rose-400'
+    },
+    amber: { 
+        light: 'bg-amber-100 border-amber-300 text-amber-900', 
+        dark: 'bg-amber-900/40 border-amber-700 text-amber-100',
+        preview: 'bg-amber-400'
+    },
+    emerald: { 
+        light: 'bg-emerald-100 border-emerald-300 text-emerald-900', 
+        dark: 'bg-emerald-900/40 border-emerald-700 text-emerald-100',
+        preview: 'bg-emerald-400'
+    },
+    cyan: { 
+        light: 'bg-cyan-100 border-cyan-300 text-cyan-900', 
+        dark: 'bg-cyan-900/40 border-cyan-700 text-cyan-100',
+        preview: 'bg-cyan-400'
+    },
+    violet: { 
+        light: 'bg-violet-100 border-violet-300 text-violet-900', 
+        dark: 'bg-violet-900/40 border-violet-700 text-violet-100',
+        preview: 'bg-violet-400'
+    }
+};
+
+const getThemeClasses = (colorKey, isDarkMode) => {
+    const key = THEME_COLORS[colorKey] ? colorKey : 'stone';
+    return isDarkMode ? THEME_COLORS[key].dark : THEME_COLORS[key].light;
+};
+
+// --- 2. Utility Functions ---
 
 const generateId = () => Math.random().toString(36).substr(2, 9);
 
@@ -101,24 +150,22 @@ const sanitizeTasks = (tasks) => {
 const migrateClients = (clients) => {
     if (!Array.isArray(clients)) return [];
     return clients.map(c => {
+        if (THEME_COLORS[c.color]) return c;
         if (c.color && c.color.includes('bg-')) {
-            if (c.color.includes('teal')) return { ...c, color: 'teal' };
-            if (c.color.includes('indigo')) return { ...c, color: 'indigo' };
-            if (c.color.includes('rose')) return { ...c, color: 'rose' };
-            if (c.color.includes('amber')) return { ...c, color: 'amber' };
-            if (c.color.includes('emerald')) return { ...c, color: 'emerald' };
-            return { ...c, color: 'stone' };
+            const map = ['teal','indigo','rose','amber','emerald','cyan','violet'];
+            const found = map.find(k => c.color.includes(k));
+            return { ...c, color: found || 'stone' };
         }
-        return c;
+        return { ...c, color: 'stone' };
     });
 };
 
-// --- 2. Initial Data ---
+// --- 3. Initial Data ---
 
 const INITIAL_CLIENTS = [
-  { id: 'c1', name: 'Internal', color: 'stone' },
-  { id: 'c2', name: 'Client A', color: 'teal' },
-  { id: 'c3', name: 'Client B', color: 'indigo' },
+  { id: 'c1', name: 'Internal', color: 'stone', logo: null },
+  { id: 'c2', name: 'Client A', color: 'teal', logo: null },
+  { id: 'c3', name: 'Client B', color: 'indigo', logo: null },
 ];
 
 const INITIAL_DATA = {
@@ -133,21 +180,6 @@ const INITIAL_DATA = {
       ]
     }
   ]
-};
-
-// --- 3. Theme System ---
-const THEME_COLORS = {
-    stone: { light: 'bg-stone-200 border-stone-300 text-stone-800', dark: 'bg-stone-800 border-stone-600 text-stone-200' },
-    teal: { light: 'bg-teal-100 border-teal-300 text-teal-900', dark: 'bg-teal-900/40 border-teal-700 text-teal-100' },
-    indigo: { light: 'bg-indigo-100 border-indigo-300 text-indigo-900', dark: 'bg-indigo-900/40 border-indigo-700 text-indigo-100' },
-    rose: { light: 'bg-rose-100 border-rose-300 text-rose-900', dark: 'bg-rose-900/40 border-rose-700 text-rose-100' },
-    amber: { light: 'bg-amber-100 border-amber-300 text-amber-900', dark: 'bg-amber-900/40 border-amber-700 text-amber-100' },
-    emerald: { light: 'bg-emerald-100 border-emerald-300 text-emerald-900', dark: 'bg-emerald-900/40 border-emerald-700 text-emerald-100' }
-};
-
-const getThemeClasses = (colorKey, isDarkMode) => {
-    const key = THEME_COLORS[colorKey] ? colorKey : 'stone';
-    return isDarkMode ? THEME_COLORS[key].dark : THEME_COLORS[key].light;
 };
 
 // --- 4. CSS ---
@@ -178,13 +210,62 @@ const TreeStyles = ({ isDarkMode }) => {
 
 // --- 5. Components ---
 
+const TitleBar = ({ user, isDarkMode, loginWithGoogle, logout }) => {
+    return (
+        <div 
+            className={`fixed top-0 left-0 right-0 h-14 border-b flex items-center justify-between px-4 z-[90] ${isDarkMode ? 'bg-stone-900 border-stone-800' : 'bg-white border-stone-200'}`}
+            onMouseDown={(e) => e.stopPropagation()} // FIX: Stop drag from starting here
+        >
+            <div className="flex items-center gap-2">
+                <div className={`p-1.5 rounded-lg ${isDarkMode ? 'bg-indigo-900 text-indigo-300' : 'bg-indigo-100 text-indigo-600'}`}>
+                    <BrainCircuit size={20} />
+                </div>
+                <h1 className={`font-bold text-lg tracking-tight ${isDarkMode ? 'text-stone-200' : 'text-stone-800'}`}>NeuroFlow</h1>
+            </div>
+
+            <div className="flex items-center gap-4">
+                {user ? (
+                    <div className="flex items-center gap-3">
+                        <div className="flex flex-col items-end hidden sm:flex">
+                            <span className={`text-xs font-bold ${isDarkMode ? 'text-stone-300' : 'text-stone-700'}`}>{user.displayName}</span>
+                            <span className={`text-[10px] ${isDarkMode ? 'text-stone-500' : 'text-stone-400'}`}>{user.email}</span>
+                        </div>
+                        <div className="relative group">
+                            <img 
+                                src={user.photoURL} 
+                                alt="User" 
+                                className="w-8 h-8 rounded-full border-2 border-transparent group-hover:border-indigo-500 transition-colors cursor-pointer"
+                            />
+                            <div className="absolute right-0 top-10 w-32 bg-white rounded-lg shadow-xl border overflow-hidden hidden group-hover:block">
+                                <button onClick={logout} className="w-full text-left px-4 py-2 text-xs text-rose-600 hover:bg-rose-50 flex items-center gap-2">
+                                    <LogOut size={12} /> Sign Out
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                ) : (
+                    <button 
+                        onClick={loginWithGoogle}
+                        className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${isDarkMode ? 'bg-stone-800 text-stone-300 hover:bg-stone-700' : 'bg-stone-100 text-stone-700 hover:bg-stone-200'}`}
+                    >
+                        <Cloud size={16} /> <span className="hidden sm:inline">Connect Google</span>
+                    </button>
+                )}
+            </div>
+        </div>
+    )
+}
+
 const InspectorPanel = ({ node, onUpdate, onDelete, isDarkMode, clients, onExportCalendar, onClose }) => {
     if (!node) return null;
     const client = clients.find(c => c.id === node.clientId);
     const isClient = node.type === 'client';
 
     return (
-        <div className={`fixed right-0 top-0 h-full w-80 shadow-2xl border-l z-[60] transform transition-transform duration-300 ${isDarkMode ? 'bg-stone-900 border-stone-800' : 'bg-white border-stone-200'}`}>
+        <div 
+            className={`fixed right-0 top-14 bottom-0 w-80 shadow-2xl border-l z-[60] transform transition-transform duration-300 overflow-y-auto ${isDarkMode ? 'bg-stone-900 border-stone-800' : 'bg-white border-stone-200'}`}
+            onMouseDown={(e) => e.stopPropagation()} // FIX: Stop drag here
+        >
             <div className={`p-4 border-b flex justify-between items-center ${isDarkMode ? 'border-stone-800' : 'border-stone-100'}`}>
                 <h3 className={`font-bold ${isDarkMode ? 'text-stone-200' : 'text-stone-800'}`}>{isClient ? 'Client Details' : 'Task Details'}</h3>
                 <button onClick={onClose} className={isDarkMode ? 'text-stone-500 hover:text-stone-300' : 'text-stone-400 hover:text-stone-600'}><X size={18}/></button>
@@ -192,14 +273,21 @@ const InspectorPanel = ({ node, onUpdate, onDelete, isDarkMode, clients, onExpor
             
             <div className="p-6 space-y-6">
                 <div>
-                    <label className={`text-xs font-bold uppercase block mb-1 ${isDarkMode ? 'text-stone-500' : 'text-stone-400'}`}>Total Duration</label>
-                    <div className={`p-3 rounded-lg border font-mono text-lg font-bold ${isDarkMode ? 'bg-stone-800 border-stone-700 text-stone-200' : 'bg-stone-50 border-stone-200 text-stone-800'}`}>
-                        {formatTime(node.timeSpent)}
-                    </div>
+                    <label className={`text-xs font-bold uppercase block mb-1 ${isDarkMode ? 'text-stone-500' : 'text-stone-400'}`}>Label</label>
+                    <input 
+                        type="text" 
+                        value={node.text} 
+                        onChange={(e) => onUpdate(node.id, { text: e.target.value })}
+                        className={`w-full border rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-teal-500 ${isDarkMode ? 'bg-stone-800 border-stone-700 text-stone-100' : 'bg-white border-stone-200'}`}
+                    />
                 </div>
 
                 {!isClient && (
                     <div className={`p-4 rounded-xl border ${isDarkMode ? 'bg-stone-800 border-stone-700' : 'bg-stone-50 border-stone-200'}`}>
+                        <div className="flex justify-between items-center mb-2">
+                            <span className={`text-xs font-bold uppercase ${isDarkMode ? 'text-stone-500' : 'text-stone-400'}`}>Total Duration</span>
+                            <span className={`font-mono font-bold ${isDarkMode ? 'text-stone-200' : 'text-stone-800'}`}>{formatTime(node.timeSpent)}</span>
+                        </div>
                         <button 
                             onClick={() => onExportCalendar(node)}
                             className="w-full flex items-center justify-center gap-2 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition-colors"
@@ -331,9 +419,14 @@ const ReportModal = ({ isOpen, onClose, data, clients, isDarkMode }) => {
     };
 
     const inputClass = `w-full border rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-teal-500 ${isDarkMode ? 'bg-stone-800 border-stone-700 text-stone-100' : 'bg-white border-stone-200'}`;
+    const optionClass = isDarkMode ? "bg-stone-800 text-stone-200" : "bg-white text-stone-800";
 
     return (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 text-left" onWheel={(e) => e.stopPropagation()}>
+        <div 
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 text-left" 
+            onWheel={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()} 
+        >
             <div className={`rounded-2xl shadow-2xl w-full max-w-md overflow-hidden ${isDarkMode ? 'bg-stone-900 border border-stone-800' : 'bg-white'}`}>
                 <div className={`p-4 border-b flex justify-between items-center ${isDarkMode ? 'bg-stone-800 border-stone-700' : 'bg-stone-50 border-stone-100'}`}>
                     <h3 className={`font-bold flex items-center gap-2 ${isDarkMode ? 'text-stone-200' : 'text-stone-800'}`}><Calendar size={18} /> Export Report</h3>
@@ -354,8 +447,8 @@ const ReportModal = ({ isOpen, onClose, data, clients, isDarkMode }) => {
                         <div>
                             <label className={`text-xs font-bold uppercase block mb-1 ${isDarkMode ? 'text-stone-500' : 'text-stone-400'}`}>Filter</label>
                             <select value={selectedClient} onChange={e => setSelectedClient(e.target.value)} className={inputClass}>
-                                <option value="ALL">All Clients & Projects</option>
-                                {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                                <option value="ALL" className={optionClass}>All Clients & Projects</option>
+                                {clients.map(c => <option key={c.id} value={c.id} className={optionClass}>{c.name}</option>)}
                             </select>
                         </div>
                         <div className={`p-4 rounded-xl border ${isDarkMode ? 'bg-stone-800 border-stone-700' : 'bg-stone-50 border-stone-200'}`}>
@@ -386,23 +479,111 @@ const ReportModal = ({ isOpen, onClose, data, clients, isDarkMode }) => {
 const ClientManagerModal = ({ isOpen, onClose, clients, setClients, isDarkMode }) => {
     const [newName, setNewName] = useState('');
     const [newColor, setNewColor] = useState('stone');
+    const [newLogo, setNewLogo] = useState(null); 
+
     if (!isOpen) return null;
+
+    const handleLogoUpload = (e) => {
+        const file = e.target.files[0];
+        if (file) {
+            if (file.size > 100 * 1024) { 
+                alert("Logo must be under 100KB");
+                return;
+            }
+            const reader = new FileReader();
+            reader.onloadend = () => {
+                setNewLogo(reader.result);
+            };
+            reader.readAsDataURL(file);
+        }
+    };
+
+    const handleAdd = () => {
+        if (!newName.trim()) return;
+        setClients([...clients, { 
+            id: generateId(), 
+            name: newName, 
+            color: newColor, 
+            logo: newLogo 
+        }]);
+        setNewName('');
+        setNewLogo(null);
+    };
+
+    const handleDelete = (id) => {
+        if (clients.length <= 1) { alert("You need at least one client."); return; }
+        setClients(clients.filter(c => c.id !== id));
+    };
+
+    const colorOptions = Object.keys(THEME_COLORS).map(key => ({
+        key,
+        previewClass: THEME_COLORS[key].preview
+    }));
+
     return (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4" onWheel={e => e.stopPropagation()}>
+        <div 
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4" 
+            onWheel={e => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()} 
+        >
             <div className={`rounded-2xl shadow-2xl w-full max-w-md overflow-hidden ${isDarkMode ? 'bg-stone-900 border-stone-800' : 'bg-white'}`}>
                 <div className="p-4 border-b border-stone-200/10 flex justify-between items-center">
                     <h3 className={`font-bold flex gap-2 ${isDarkMode ? 'text-stone-200' : 'text-stone-800'}`}><Users size={18}/> Clients</h3>
                     <button onClick={onClose}><X size={18} className="text-stone-400"/></button>
                 </div>
                 <div className="p-6 space-y-6">
-                    <div className="flex gap-2">
-                        <input value={newName} onChange={e => setNewName(e.target.value)} placeholder="New Client Name..." className={`flex-1 border rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-teal-500 ${isDarkMode ? 'bg-stone-800 border-stone-700 text-stone-100' : 'bg-white border-stone-200'}`} />
-                        <button onClick={() => { if(newName.trim()) { setClients([...clients, { id: generateId(), name: newName, color: newColor }]); setNewName(''); }}} className="bg-teal-600 text-white px-4 rounded-lg text-sm font-bold">Add</button>
+                    <div className="space-y-4">
+                        <div>
+                            <label className={`text-xs font-bold uppercase block mb-1 ${isDarkMode ? 'text-stone-500' : 'text-stone-400'}`}>Name & Logo</label>
+                            <div className="flex gap-2 items-center">
+                                <div className="relative group shrink-0">
+                                    <div className={`w-10 h-10 rounded-lg border-2 border-dashed flex items-center justify-center overflow-hidden ${isDarkMode ? 'border-stone-700 bg-stone-800' : 'border-stone-300 bg-stone-50'}`}>
+                                        {newLogo ? (
+                                            <img src={newLogo} alt="Logo" className="w-full h-full object-cover" />
+                                        ) : (
+                                            <Upload size={16} className="text-stone-400" />
+                                        )}
+                                    </div>
+                                    <input 
+                                        type="file" 
+                                        accept="image/*" 
+                                        onChange={handleLogoUpload} 
+                                        className="absolute inset-0 opacity-0 cursor-pointer" 
+                                        title="Upload Logo (Max 100KB)"
+                                    />
+                                </div>
+                                <input value={newName} onChange={e => setNewName(e.target.value)} placeholder="Client Name..." className={`flex-1 border rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-teal-500 ${isDarkMode ? 'bg-stone-800 border-stone-700 text-stone-100' : 'bg-white border-stone-200'}`} />
+                            </div>
+                        </div>
+                        
+                        <div>
+                            <label className={`text-xs font-bold uppercase block mb-1 ${isDarkMode ? 'text-stone-500' : 'text-stone-400'}`}>Color Theme</label>
+                            <div className="flex gap-3 overflow-x-auto pb-2 no-scrollbar">
+                                {colorOptions.map((c) => (
+                                    <button 
+                                        key={c.key} 
+                                        onClick={() => setNewColor(c.key)} 
+                                        className={`w-8 h-8 rounded-full border-2 flex-shrink-0 transition-all ${c.previewClass} ${newColor === c.key ? 'ring-2 ring-offset-2 ring-teal-500 border-transparent scale-110' : 'border-transparent opacity-60 hover:opacity-100'} ${isDarkMode ? 'ring-offset-stone-900' : 'ring-offset-white'}`}
+                                        title={c.key.charAt(0).toUpperCase() + c.key.slice(1)}
+                                    />
+                                ))}
+                            </div>
+                        </div>
+
+                        <button onClick={handleAdd} disabled={!newName.trim()} className="w-full bg-teal-600 text-white px-4 py-2 rounded-lg text-sm font-bold disabled:opacity-50 hover:bg-teal-700 transition-colors">Add Client</button>
                     </div>
+
                     <div className="space-y-2 max-h-48 overflow-y-auto">
                         {clients.map(c => (
-                            <div key={c.id} className={`flex justify-between p-2 rounded border ${isDarkMode ? 'bg-stone-800 border-stone-700' : 'bg-stone-50 border-stone-100'}`}>
-                                <span className={`text-sm ${isDarkMode ? 'text-stone-300' : 'text-stone-700'}`}>{c.name}</span>
+                            <div key={c.id} className={`flex justify-between items-center p-2 rounded border ${isDarkMode ? 'bg-stone-800 border-stone-700' : 'bg-stone-50 border-stone-100'}`}>
+                                <div className="flex items-center gap-2">
+                                    {c.logo ? (
+                                        <img src={c.logo} alt="Logo" className="w-6 h-6 rounded object-cover border border-stone-200" />
+                                    ) : (
+                                        <div className={`w-3 h-3 rounded-full ${THEME_COLORS[c.color] ? THEME_COLORS[c.color].preview : 'bg-stone-400'}`}></div>
+                                    )}
+                                    <span className={`text-sm ${isDarkMode ? 'text-stone-300' : 'text-stone-700'}`}>{c.name}</span>
+                                </div>
                                 <button onClick={() => setClients(clients.filter(x => x.id !== c.id))} className="text-stone-400 hover:text-rose-500"><Trash2 size={14}/></button>
                             </div>
                         ))}
@@ -475,6 +656,9 @@ const ClientNode = ({ node, direction, clients, onUpdate, onAddChild, onDelete, 
     if (!node) return null;
     const client = (clients && clients.length > 0) ? (clients.find(c => c.id === node.clientId) || clients[0]) : { color: 'stone' };
     const themeClass = getThemeClasses(client.color, isDarkMode);
+    
+    // Fix for dark mode dropdown options
+    const optionClass = isDarkMode ? "bg-stone-800 text-stone-200" : "bg-white text-stone-800";
 
     const handleClientChange = (e) => {
         if (e.target.value === 'ADD_NEW') openClientManager();
@@ -484,16 +668,22 @@ const ClientNode = ({ node, direction, clients, onUpdate, onAddChild, onDelete, 
     return (
         <div className={`mm-child-${direction}`}>
             <div className={`relative z-20 px-4 py-2.5 rounded-full shadow-md border-2 flex items-center gap-2 transition-all hover:scale-[1.02] shrink-0 min-w-[170px] ${themeClass}`}>
-                <Briefcase size={18} className="opacity-80 flex-shrink-0" />
+                {/* Logo Logic */}
+                {client.logo ? (
+                    <img src={client.logo} alt="Logo" className="w-5 h-5 rounded object-cover border border-current/20 flex-shrink-0" />
+                ) : (
+                    <Briefcase size={18} className="opacity-80 flex-shrink-0" />
+                )}
+                
                 {/* Dropdown for Client Selection */}
                 <select 
                     value={node.clientId} 
                     onChange={handleClientChange} 
                     className="bg-transparent font-bold text-sm outline-none cursor-pointer appearance-none truncate flex-1 text-center"
                 >
-                    {clients && clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                    <option disabled>──────────</option>
-                    <option value="ADD_NEW">+ Add New...</option>
+                    {clients && clients.map(c => <option key={c.id} value={c.id} className={optionClass}>{c.name}</option>)}
+                    <option disabled className={optionClass}>──────────</option>
+                    <option value="ADD_NEW" className={optionClass}>+ Add New...</option>
                 </select>
                 
                 <div className="flex gap-1 border-l pl-2 border-current/20">
@@ -544,15 +734,17 @@ const NeuroFlowApp = () => {
   // --- Auth & Data Loading ---
   
   useEffect(() => {
-        // SAFETY CHECK: Prevent crash if auth is missing
-        if (!auth) {
-          console.error("Auth not initialized. Check VITE_FIREBASE_CONFIG.");
-          return;
-        };
+      // Safety check for auth
+      if (!auth) return;
+
       // 1. Init Auth
       const initAuth = async () => {
           if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-              await signInWithCustomToken(auth, __initial_auth_token);
+              try {
+                  await signInWithCustomToken(auth, __initial_auth_token);
+              } catch (e) {
+                  console.error("Auth Token Init Error:", e);
+              }
           }
       };
       initAuth();
@@ -567,14 +759,19 @@ const NeuroFlowApp = () => {
                   if (snapshot.exists()) {
                       const d = snapshot.data();
                       if (d.tasks) setData({ ...d, tasks: sanitizeTasks(d.tasks) });
-                      if (d.clients) setClients(d.clients);
+                      if (d.clients) setClients(migrateClients(d.clients));
+                      if (d.settings && d.settings.theme) setIsDarkMode(d.settings.theme === 'dark');
                   }
               }, (err) => console.log("Read error (expected if new user):", err));
               return () => unsubData();
           } else {
               // Fallback to local storage if logged out
               const saved = localStorage.getItem('neuroflow-radial');
+              const savedClients = localStorage.getItem('neuroflow-clients');
+              const savedTheme = localStorage.getItem('neuroflow-theme');
               if (saved) setData(JSON.parse(saved));
+              if (savedClients) setClients(migrateClients(JSON.parse(savedClients)));
+              if (savedTheme) setIsDarkMode(savedTheme === 'dark');
           }
       });
       return () => unsubscribe();
@@ -583,20 +780,34 @@ const NeuroFlowApp = () => {
   // --- Data Saving (Debounced) ---
   useEffect(() => {
       const saveData = async () => {
-          if (user) {
-              const docRef = doc(db, 'artifacts', appId, 'users', user.uid, 'neuroflow_data', 'main');
-              await setDoc(docRef, { tasks: data.tasks, clients, weekOffset: data.weekOffset }, { merge: true });
-          } else {
-              localStorage.setItem('neuroflow-radial', JSON.stringify(data));
-              localStorage.setItem('neuroflow-clients', JSON.stringify(clients));
+          try {
+              if (user && db) { // Check db existence too
+                  const docRef = doc(db, 'artifacts', appId, 'users', user.uid, 'neuroflow_data', 'main');
+                  await setDoc(docRef, { 
+                      tasks: data.tasks, 
+                      clients, 
+                      weekOffset: data.weekOffset,
+                      settings: { theme: isDarkMode ? 'dark' : 'light' }
+                  }, { merge: true });
+              } else {
+                  localStorage.setItem('neuroflow-radial', JSON.stringify(data));
+                  localStorage.setItem('neuroflow-clients', JSON.stringify(clients));
+                  localStorage.setItem('neuroflow-theme', isDarkMode ? 'dark' : 'light');
+              }
+          } catch (e) {
+              console.error("Save Data Error:", e);
           }
       };
       const timeout = setTimeout(saveData, 1000);
       return () => clearTimeout(timeout);
-  }, [data, clients, user]);
+  }, [data, clients, user, isDarkMode]);
 
   // --- Google Calendar Sync ---
   const loginWithGoogle = async () => {
+      if (!auth || !provider) {
+          alert("Firebase not configured. Check console.");
+          return;
+      }
       try {
           const result = await signInWithPopup(auth, provider);
           const credential = GoogleAuthProvider.credentialFromResult(result);
@@ -764,7 +975,11 @@ const NeuroFlowApp = () => {
   // --- Rendering ---
   
   const handleMouseDown = (e) => {
-      if (e.target.closest('button, input, select, .z-20, .z-50, .z-60')) return;
+      // FIX: Replaced complex .closest() check with a simplified check
+      // We are relying on stopPropagation in the child components (TitleBar, etc.)
+      // to preventing dragging where we don't want it.
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON' || e.target.tagName === 'SELECT') return;
+      
       setIsDragging(true);
       setLastMouse({ x: e.clientX, y: e.clientY });
   };
@@ -804,17 +1019,11 @@ const NeuroFlowApp = () => {
       <TreeStyles isDarkMode={isDarkMode} />
       <div className="absolute inset-0 z-0 opacity-[0.04] pointer-events-none" style={{ backgroundImage: 'radial-gradient(circle, #888 1.5px, transparent 1.5px)', backgroundSize: '24px 24px', transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }}></div>
       
-      {/* Top Right Controls */}
-      <div className="absolute top-6 right-6 z-[100] flex flex-col gap-3" onMouseDown={e => e.stopPropagation()}>
-         {!user ? (
-             <button onClick={loginWithGoogle} className={`${controlBtnClass} bg-blue-600 text-white hover:bg-blue-700 border-transparent`} title="Connect Google">
-                 <Cloud size={20} />
-             </button>
-         ) : (
-             <button onClick={() => { signOut(auth); setUser(null); }} className={`${controlBtnClass} text-rose-500`} title="Sign Out">
-                 <LogOut size={20} />
-             </button>
-         )}
+      {/* Title Bar with Auth */}
+      <TitleBar user={user} isDarkMode={isDarkMode} loginWithGoogle={loginWithGoogle} logout={() => { signOut(auth); setUser(null); }} />
+
+      {/* Top Right Controls (Shifted down below TitleBar) */}
+      <div className="absolute top-16 right-6 z-[100] flex flex-col gap-3" onMouseDown={e => e.stopPropagation()}>
          <button onClick={() => setIsDarkMode(!isDarkMode)} className={controlBtnClass} title="Toggle Theme">
              {isDarkMode ? <Sun size={20} /> : <Moon size={20} />}
          </button>
