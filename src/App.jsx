@@ -47,17 +47,20 @@ import {
 } from "firebase/firestore";
 
 /**
- * NeuroFlow Week Planner - V4.2 (Robust Async Handling)
- * Fixes: Wrapped async useEffects in try/catch to prevent 'unhandledrejection'
+ * NeuroFlow Week Planner - V4.4 (Bug Fixes)
+ * Fixes: 
+ * - Fixed 'closest' SyntaxError in drag logic
+ * - Restored Robust Firebase Setup
  */
 
-// --- 0. Firebase Setup ---
+// --- 0. Firebase Setup (Restored Stable Version) ---
 let app, auth, db, provider;
 let appId = 'neuroflow-prod'; 
 
 try {
     // Vercel/Vite exposes env vars via import.meta.env
-    const configRaw = import.meta.env.VITE_FIREBASE_CONFIG;
+    // We check if import.meta exists to avoid crashing in environments where it's not supported
+    const configRaw = typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env.VITE_FIREBASE_CONFIG : undefined;
 
     if (configRaw) {
         const firebaseConfig = JSON.parse(configRaw);
@@ -68,7 +71,18 @@ try {
         // CORRECTED LINE: Clean URL string (No markdown syntax)
         provider.addScope('https://www.googleapis.com/auth/calendar.events');
          } else {
-        console.warn("VITE_FIREBASE_CONFIG is missing. Auth will fail.");
+        // Fallback for preview environments if global is set
+        if (typeof __firebase_config !== 'undefined') {
+             const firebaseConfig = JSON.parse(__firebase_config);
+             app = initializeApp(firebaseConfig);
+             auth = getAuth(app);
+             db = getFirestore(app);
+             provider = new GoogleAuthProvider();
+             provider.addScope('https://www.googleapis.com/auth/calendar.events');
+             if (typeof __app_id !== 'undefined') appId = __app_id;
+        } else {
+             console.warn("VITE_FIREBASE_CONFIG is missing. Auth will fail.");
+        }
     }
 } catch (e) {
     console.error("Firebase init failed:", e);
@@ -214,7 +228,8 @@ const TitleBar = ({ user, isDarkMode, loginWithGoogle, logout }) => {
     return (
         <div 
             className={`fixed top-0 left-0 right-0 h-14 border-b flex items-center justify-between px-4 z-[90] ${isDarkMode ? 'bg-stone-900 border-stone-800' : 'bg-white border-stone-200'}`}
-            onMouseDown={(e) => e.stopPropagation()} // FIX: Stop drag from starting here
+            onMouseDown={(e) => e.stopPropagation()} 
+            onTouchStart={(e) => e.stopPropagation()}
         >
             <div className="flex items-center gap-2">
                 <div className={`p-1.5 rounded-lg ${isDarkMode ? 'bg-indigo-900 text-indigo-300' : 'bg-indigo-100 text-indigo-600'}`}>
@@ -263,45 +278,49 @@ const InspectorPanel = ({ node, onUpdate, onDelete, isDarkMode, clients, onExpor
 
     return (
         <div 
-            className={`fixed right-0 top-14 bottom-0 w-80 shadow-2xl border-l z-[60] transform transition-transform duration-300 overflow-y-auto ${isDarkMode ? 'bg-stone-900 border-stone-800' : 'bg-white border-stone-200'}`}
-            onMouseDown={(e) => e.stopPropagation()} // FIX: Stop drag here
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4"
+            onMouseDown={(e) => e.stopPropagation()} 
+            onTouchStart={(e) => e.stopPropagation()}
+            onWheel={(e) => e.stopPropagation()}
         >
-            <div className={`p-4 border-b flex justify-between items-center ${isDarkMode ? 'border-stone-800' : 'border-stone-100'}`}>
-                <h3 className={`font-bold ${isDarkMode ? 'text-stone-200' : 'text-stone-800'}`}>{isClient ? 'Client Details' : 'Task Details'}</h3>
-                <button onClick={onClose} className={isDarkMode ? 'text-stone-500 hover:text-stone-300' : 'text-stone-400 hover:text-stone-600'}><X size={18}/></button>
-            </div>
-            
-            <div className="p-6 space-y-6">
-                <div>
-                    <label className={`text-xs font-bold uppercase block mb-1 ${isDarkMode ? 'text-stone-500' : 'text-stone-400'}`}>Label</label>
-                    <input 
-                        type="text" 
-                        value={node.text} 
-                        onChange={(e) => onUpdate(node.id, { text: e.target.value })}
-                        className={`w-full border rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-teal-500 ${isDarkMode ? 'bg-stone-800 border-stone-700 text-stone-100' : 'bg-white border-stone-200'}`}
-                    />
+            <div className={`rounded-2xl shadow-2xl w-full max-w-md overflow-hidden max-h-[90vh] overflow-y-auto ${isDarkMode ? 'bg-stone-900 border border-stone-800' : 'bg-white'}`}>
+                <div className={`p-4 border-b flex justify-between items-center ${isDarkMode ? 'border-stone-800' : 'border-stone-100'}`}>
+                    <h3 className={`font-bold ${isDarkMode ? 'text-stone-200' : 'text-stone-800'}`}>{isClient ? 'Client Details' : 'Task Details'}</h3>
+                    <button onClick={onClose} className={isDarkMode ? 'text-stone-500 hover:text-stone-300' : 'text-stone-400 hover:text-stone-600'}><X size={18}/></button>
                 </div>
-
-                {!isClient && (
-                    <div className={`p-4 rounded-xl border ${isDarkMode ? 'bg-stone-800 border-stone-700' : 'bg-stone-50 border-stone-200'}`}>
-                        <div className="flex justify-between items-center mb-2">
-                            <span className={`text-xs font-bold uppercase ${isDarkMode ? 'text-stone-500' : 'text-stone-400'}`}>Total Duration</span>
-                            <span className={`font-mono font-bold ${isDarkMode ? 'text-stone-200' : 'text-stone-800'}`}>{formatTime(node.timeSpent)}</span>
-                        </div>
-                        <button 
-                            onClick={() => onExportCalendar(node)}
-                            className="w-full flex items-center justify-center gap-2 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition-colors"
-                        >
-                            <CalendarCheck size={14} /> Push to Calendar
-                        </button>
-                        <p className="text-[10px] text-center mt-2 text-stone-500">Creates a 1hr event (or duration) on GCal</p>
+                
+                <div className="p-6 space-y-6">
+                    <div>
+                        <label className={`text-xs font-bold uppercase block mb-1 ${isDarkMode ? 'text-stone-500' : 'text-stone-400'}`}>Label</label>
+                        <input 
+                            type="text" 
+                            value={node.text} 
+                            onChange={(e) => onUpdate(node.id, { text: e.target.value })}
+                            className={`w-full border rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-teal-500 ${isDarkMode ? 'bg-stone-800 border-stone-700 text-stone-100' : 'bg-white border-stone-200'}`}
+                        />
                     </div>
-                )}
 
-                <div className="pt-4 border-t border-stone-200/10">
-                    <button onClick={() => onDelete(node.id)} className="w-full py-2 flex items-center justify-center gap-2 text-rose-500 hover:bg-rose-500/10 rounded-lg transition-colors text-sm font-medium">
-                        <Trash2 size={16}/> Delete Branch
-                    </button>
+                    {!isClient && (
+                        <div className={`p-4 rounded-xl border ${isDarkMode ? 'bg-stone-800 border-stone-700' : 'bg-stone-50 border-stone-200'}`}>
+                            <div className="flex justify-between items-center mb-2">
+                                <span className={`text-xs font-bold uppercase ${isDarkMode ? 'text-stone-500' : 'text-stone-400'}`}>Total Duration</span>
+                                <span className={`font-mono font-bold ${isDarkMode ? 'text-stone-200' : 'text-stone-800'}`}>{formatTime(node.timeSpent)}</span>
+                            </div>
+                            <button 
+                                onClick={() => onExportCalendar(node)}
+                                className="w-full flex items-center justify-center gap-2 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition-colors"
+                            >
+                                <CalendarCheck size={14} /> Push to Calendar
+                            </button>
+                            <p className="text-[10px] text-center mt-2 text-stone-500">Creates a 1hr event (or duration) on GCal</p>
+                        </div>
+                    )}
+
+                    <div className="pt-4 border-t border-stone-200/10">
+                        <button onClick={() => onDelete(node.id)} className="w-full py-2 flex items-center justify-center gap-2 text-rose-500 hover:bg-rose-500/10 rounded-lg transition-colors text-sm font-medium">
+                            <Trash2 size={16}/> Delete Branch
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -426,6 +445,7 @@ const ReportModal = ({ isOpen, onClose, data, clients, isDarkMode }) => {
             className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 text-left" 
             onWheel={(e) => e.stopPropagation()}
             onMouseDown={(e) => e.stopPropagation()} 
+            onTouchStart={(e) => e.stopPropagation()}
         >
             <div className={`rounded-2xl shadow-2xl w-full max-w-md overflow-hidden ${isDarkMode ? 'bg-stone-900 border border-stone-800' : 'bg-white'}`}>
                 <div className={`p-4 border-b flex justify-between items-center ${isDarkMode ? 'bg-stone-800 border-stone-700' : 'bg-stone-50 border-stone-100'}`}>
@@ -525,6 +545,7 @@ const ClientManagerModal = ({ isOpen, onClose, clients, setClients, isDarkMode }
             className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4" 
             onWheel={e => e.stopPropagation()}
             onMouseDown={(e) => e.stopPropagation()} 
+            onTouchStart={(e) => e.stopPropagation()}
         >
             <div className={`rounded-2xl shadow-2xl w-full max-w-md overflow-hidden ${isDarkMode ? 'bg-stone-900 border-stone-800' : 'bg-white'}`}>
                 <div className="p-4 border-b border-stone-200/10 flex justify-between items-center">
@@ -974,12 +995,27 @@ const NeuroFlowApp = () => {
 
   // --- Rendering ---
   
-  const handleMouseDown = (e) => {
-      // FIX: Replaced complex .closest() check with a simplified check
-      // We are relying on stopPropagation in the child components (TitleBar, etc.)
-      // to preventing dragging where we don't want it.
+  const handleTouchStart = (e) => {
+      // Allow drag if target is background
+      // Safe check: ensure not clicking a form element or button
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON' || e.target.tagName === 'SELECT') return;
-      
+      const touch = e.touches[0];
+      setIsDragging(true);
+      setLastMouse({ x: touch.clientX, y: touch.clientY });
+  };
+
+  const handleTouchMove = (e) => {
+      if (!isDragging) return;
+      const touch = e.touches[0];
+      const dx = touch.clientX - lastMouse.x;
+      const dy = touch.clientY - lastMouse.y;
+      setLastMouse({ x: touch.clientX, y: touch.clientY });
+      setView(prev => ({ ...prev, x: prev.x + dx, y: prev.y + dy }));
+  };
+
+  const handleMouseDown = (e) => {
+      // Safe check: ensure not clicking a form element or button
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON' || e.target.tagName === 'SELECT') return;
       setIsDragging(true);
       setLastMouse({ x: e.clientX, y: e.clientY });
   };
@@ -1014,7 +1050,13 @@ const NeuroFlowApp = () => {
     <div 
         className={`w-full h-screen overflow-hidden relative font-sans transition-colors duration-500 ${isDarkMode ? 'bg-[#1c1917] selection:bg-teal-900' : 'bg-[#F7F5F2] selection:bg-teal-200'} ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
         onWheel={(e) => { const s = -e.deltaY * 0.001; setView(p => ({...p, scale: Math.min(Math.max(0.1, p.scale + s), 3)})) }} 
-        onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={() => setIsDragging(false)} onMouseLeave={() => setIsDragging(false)}
+        onMouseDown={handleMouseDown} 
+        onMouseMove={handleMouseMove} 
+        onMouseUp={() => setIsDragging(false)} 
+        onMouseLeave={() => setIsDragging(false)}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={() => setIsDragging(false)}
     >
       <TreeStyles isDarkMode={isDarkMode} />
       <div className="absolute inset-0 z-0 opacity-[0.04] pointer-events-none" style={{ backgroundImage: 'radial-gradient(circle, #888 1.5px, transparent 1.5px)', backgroundSize: '24px 24px', transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }}></div>
@@ -1023,7 +1065,7 @@ const NeuroFlowApp = () => {
       <TitleBar user={user} isDarkMode={isDarkMode} loginWithGoogle={loginWithGoogle} logout={() => { signOut(auth); setUser(null); }} />
 
       {/* Top Right Controls (Shifted down below TitleBar) */}
-      <div className="absolute top-16 right-6 z-[100] flex flex-col gap-3" onMouseDown={e => e.stopPropagation()}>
+      <div className="absolute top-16 right-6 z-[90] flex flex-col gap-3" onMouseDown={e => e.stopPropagation()} onTouchStart={e => e.stopPropagation()}>
          <button onClick={() => setIsDarkMode(!isDarkMode)} className={controlBtnClass} title="Toggle Theme">
              {isDarkMode ? <Sun size={20} /> : <Moon size={20} />}
          </button>
@@ -1040,7 +1082,10 @@ const NeuroFlowApp = () => {
                 </div>
             </div>
 
-            <div className={`relative z-50 w-64 h-64 rounded-full shadow-[0_0_40px_rgba(0,0,0,0.1)] border-[6px] flex flex-col items-center justify-center group select-none shrink-0 transition-colors ${isDarkMode ? 'bg-stone-800 border-stone-900' : 'bg-stone-50 border-white'}`} onMouseDown={e => e.stopPropagation()}>
+            <div className={`relative z-50 w-64 h-64 rounded-full shadow-[0_0_40px_rgba(0,0,0,0.1)] border-[6px] flex flex-col items-center justify-center group select-none shrink-0 transition-colors ${isDarkMode ? 'bg-stone-800 border-stone-900' : 'bg-stone-50 border-white'}`} 
+                onMouseDown={e => e.stopPropagation()}
+                onTouchStart={e => e.stopPropagation()}
+            >
                 <div className={`absolute -inset-4 border-2 border-dashed rounded-full animate-[spin_60s_linear_infinite] pointer-events-none ${isDarkMode ? 'border-stone-700' : 'border-stone-300/60'}`}></div>
                 <div className="text-center z-10">
                     <div className={`text-xs font-bold uppercase tracking-widest mb-1.5 ${isDarkMode ? 'text-stone-500' : 'text-stone-400'}`}>Current Week</div>
@@ -1068,7 +1113,11 @@ const NeuroFlowApp = () => {
       {inspectedNode && <InspectorPanel node={inspectedNode} onUpdate={updateNode} onDelete={deleteNode} isDarkMode={isDarkMode} clients={clients} onExportCalendar={exportToCalendar} onClose={() => setInspectedNode(null)} />}
       
       {deleteTarget && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
+        <div 
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[200] flex items-center justify-center p-4"
+            onMouseDown={e => e.stopPropagation()}
+            onTouchStart={e => e.stopPropagation()}
+        >
            <div className={`rounded-xl p-6 max-w-sm w-full shadow-2xl ${isDarkMode ? 'bg-stone-900 border border-stone-800' : 'bg-white'}`}>
               <h3 className={`font-bold text-lg mb-2 ${isDarkMode ? 'text-stone-200' : 'text-stone-800'}`}>Delete Branch?</h3>
               <p className={`mb-6 text-sm ${isDarkMode ? 'text-stone-400' : 'text-stone-600'}`}>This will permanently delete this item and all its sub-tasks. This cannot be undone.</p>
