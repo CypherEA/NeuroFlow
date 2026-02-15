@@ -47,19 +47,17 @@ import {
 } from "firebase/firestore";
 
 /**
- * NeuroFlow Week Planner - V4.4 (Bug Fixes)
+ * NeuroFlow Week Planner - V4.5 (Firestore Fix)
  * Fixes: 
- * - Fixed 'closest' SyntaxError in drag logic
- * - Restored Robust Firebase Setup
+ * - Replaced `undefined` with `null` in data structures to satisfy Firestore requirements.
+ * - Added data sanitization before save.
  */
 
-// --- 0. Firebase Setup (Restored Stable Version) ---
+// --- 0. Firebase Setup ---
 let app, auth, db, provider;
 let appId = 'neuroflow-prod'; 
 
 try {
-    // Vercel/Vite exposes env vars via import.meta.env
-    // We check if import.meta exists to avoid crashing in environments where it's not supported
     const configRaw = typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env.VITE_FIREBASE_CONFIG : undefined;
 
     if (configRaw) {
@@ -68,10 +66,8 @@ try {
         auth = getAuth(app);
         db = getFirestore(app);
         provider = new GoogleAuthProvider();
-        // CORRECTED LINE: Clean URL string (No markdown syntax)
         provider.addScope('https://www.googleapis.com/auth/calendar.events');
          } else {
-        // Fallback for preview environments if global is set
         if (typeof __firebase_config !== 'undefined') {
              const firebaseConfig = JSON.parse(__firebase_config);
              app = initializeApp(firebaseConfig);
@@ -804,8 +800,9 @@ const NeuroFlowApp = () => {
           try {
               if (user && db) { // Check db existence too
                   const docRef = doc(db, 'artifacts', appId, 'users', user.uid, 'neuroflow_data', 'main');
+                  const cleanTasks = JSON.parse(JSON.stringify(data.tasks, (k, v) => v === undefined ? null : v));
                   await setDoc(docRef, { 
-                      tasks: data.tasks, 
+                      tasks: cleanTasks, 
                       clients, 
                       weekOffset: data.weekOffset,
                       settings: { theme: isDarkMode ? 'dark' : 'light' }
@@ -953,7 +950,7 @@ const NeuroFlowApp = () => {
     const isRootAdd = parentId === null;
     const newNode = {
       id: generateId(), text: '', type: isRootAdd ? 'client' : 'task', completed: false, expanded: true, timeSpent: 0, sessions: [],
-      clientId: isRootAdd ? clients[0].id : undefined, children: []
+      clientId: isRootAdd ? clients[0].id : null, children: []
     };
     if (isRootAdd) {
       newNode.children.push({ id: generateId(), text: '', type: 'task', completed: false, expanded: true, timeSpent: 0, sessions: [], children: [] });
