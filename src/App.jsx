@@ -29,7 +29,9 @@ import {
   BrainCircuit,
   MessageSquarePlus,
   List,
-  Share2
+  Share2,
+  Zap, 
+  Clock
 } from 'lucide-react';
 
 // --- Firebase Imports ---
@@ -50,10 +52,13 @@ import {
 } from "firebase/firestore";
 
 /**
- * NeuroFlow Week Planner - V5.3 (Clean Slate)
- * Features: 
- * - Empty Initial State (No Clients, No Tasks)
- * - Production-Ready Defaults
+ * NeuroFlow Week Planner - V7.1 (Stable Polish)
+ * * CORE FEATURES:
+ * 1. FreeMind Layout Engine (Left/Right weighted trees)
+ * 2. Firestore Cloud Sync & Google Calendar Integration
+ * 3. ADHD-Friendly UI (Warm Dark Mode, Task Aging, Focus Mode)
+ * 4. Context-Aware Modal Workflow (Task -> Client -> Task)
+ * 5. Robust Drag & Drop and Z-Index Stacking
  */
 
 // --- 0. Firebase Setup ---
@@ -173,7 +178,16 @@ const migrateClients = (clients) => {
     });
 };
 
-// --- 3. Initial Data (CLEAN SLATE) ---
+const getTaskAge = (createdAt) => {
+    if (!createdAt) return 0;
+    const now = new Date();
+    const created = new Date(createdAt);
+    const diffTime = Math.abs(now - created);
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
+    return diffDays;
+};
+
+// --- 3. Initial Data ---
 
 const INITIAL_CLIENTS = [];
 
@@ -264,16 +278,29 @@ const Timer = ({ isRunning, timeSpent, onToggle, isDarkMode }) => (
     </button>
 );
 
-const ListViewTask = ({ node, depth, onUpdate, onAddChild, onDelete, onTimerToggle, activeTimers, isDarkMode, onInspect }) => {
+const ListViewTask = ({ node, depth, onUpdate, onAddChild, onDelete, onTimerToggle, activeTimers, isDarkMode, onInspect, focusId }) => {
     if (!node) return null;
     const isRunning = activeTimers.includes(node.id);
     const indent = depth * 24; 
+    
+    // Focus Logic
+    const isFocused = focusId && focusId === node.id;
+    const isDimmed = focusId && !isFocused;
+    
+    // Styles
     const rowClass = isDarkMode ? 'border-b border-stone-800 hover:bg-stone-800/50' : 'border-b border-stone-100 hover:bg-stone-50';
     const textClass = node.completed ? (isDarkMode ? 'line-through text-stone-600' : 'line-through text-stone-400') : (isDarkMode ? 'text-stone-200' : 'text-stone-800');
+    
+    // Aging Logic
+    const daysOld = getTaskAge(node.createdAt);
+    const isStale = !node.completed && daysOld > 3;
 
     return (
         <>
-            <div className={`flex items-center py-3 pr-4 group ${rowClass}`} style={{ paddingLeft: `${indent}px` }}>
+            <div 
+                className={`flex items-center py-3 pr-4 group transition-opacity duration-300 ${rowClass} ${isDimmed ? 'opacity-20 blur-[1px]' : 'opacity-100'} ${isFocused ? 'bg-amber-50/10' : ''}`} 
+                style={{ paddingLeft: `${indent}px` }}
+            >
                 <div className="flex items-center gap-2 flex-1 min-w-0">
                      {node.children && node.children.length > 0 && (
                         <button onClick={() => onUpdate(node.id, { expanded: !node.expanded })} className={`p-1 rounded hover:bg-stone-200/20 ${isDarkMode ? 'text-stone-500' : 'text-stone-400'}`}>
@@ -284,7 +311,15 @@ const ListViewTask = ({ node, depth, onUpdate, onAddChild, onDelete, onTimerTogg
                     <button onClick={() => onUpdate(node.id, { completed: !node.completed })} className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${node.completed ? 'bg-teal-600 border-teal-600 text-white' : 'border-stone-400 bg-transparent'}`}>
                         {node.completed && <Check size={10} />}
                     </button>
+                    
                     <input type="text" value={node.text} onChange={(e) => onUpdate(node.id, { text: e.target.value })} className={`bg-transparent outline-none flex-1 text-sm font-medium ${textClass}`} placeholder="Task..." />
+                    
+                    {/* Age Indicator */}
+                    {isStale && (
+                        <div className={`flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full ${daysOld > 7 ? 'bg-amber-500/20 text-amber-600' : 'bg-stone-500/20 text-stone-500'}`}>
+                            <Clock size={10} /> <span>{daysOld}d</span>
+                        </div>
+                    )}
                 </div>
                 <div className="flex items-center gap-2 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                     <Timer isRunning={isRunning} timeSpent={node.timeSpent} onToggle={() => onTimerToggle(node.id)} isDarkMode={isDarkMode} />
@@ -294,30 +329,29 @@ const ListViewTask = ({ node, depth, onUpdate, onAddChild, onDelete, onTimerTogg
                 </div>
             </div>
             {node.expanded && node.children && node.children.map(child => (
-                <ListViewTask key={child.id} node={child} depth={depth + 1} onUpdate={onUpdate} onAddChild={onAddChild} onDelete={onDelete} onTimerToggle={onTimerToggle} activeTimers={activeTimers} isDarkMode={isDarkMode} onInspect={onInspect} />
+                <ListViewTask key={child.id} node={child} depth={depth + 1} onUpdate={onUpdate} onAddChild={onAddChild} onDelete={onDelete} onTimerToggle={onTimerToggle} activeTimers={activeTimers} isDarkMode={isDarkMode} onInspect={onInspect} focusId={focusId} />
             ))}
         </>
     );
 };
 
-const ListViewClient = ({ node, clients, onUpdate, onAddChild, onDelete, onTimerToggle, activeTimers, openClientManager, isDarkMode, onInspect }) => {
+const ListViewClient = ({ node, clients, onUpdate, onAddChild, onDelete, onTimerToggle, activeTimers, openClientManager, isDarkMode, onInspect, focusId }) => {
     if (!node) return null;
     const client = clients.find(c => c.id === node.clientId) || { color: 'stone', name: 'Unknown' };
     const themeClass = getThemeClasses(client.color, isDarkMode);
     const optionClass = isDarkMode ? "bg-stone-800 text-stone-200" : "bg-white text-stone-800";
+    
+    const isDimmed = focusId && !node.children.some(child => JSON.stringify(child).includes(focusId));
 
     return (
-        <div className="mb-4">
+        <div className={`mb-4 transition-opacity duration-300 ${isDimmed ? 'opacity-20 grayscale' : 'opacity-100'}`}>
             <div className={`flex items-center justify-between p-3 rounded-lg border-l-4 mb-1 ${themeClass}`}>
                 <div className="flex items-center gap-3">
                     {client.logo ? <img src={client.logo} alt="Logo" className="w-6 h-6 rounded object-cover" /> : <Briefcase size={18} className="opacity-80" />}
                     
                     <select 
                         value={node.clientId} 
-                        onChange={(e) => {
-                             if(e.target.value === 'ADD_NEW') openClientManager();
-                             else onUpdate(node.id, { clientId: e.target.value });
-                        }}
+                        onChange={(e) => { if(e.target.value === 'ADD_NEW') openClientManager(); else onUpdate(node.id, { clientId: e.target.value }); }}
                         className={`bg-transparent text-sm font-bold outline-none cursor-pointer`}
                     >
                         {clients.map(c => <option key={c.id} value={c.id} className={optionClass}>{c.name}</option>)}
@@ -328,10 +362,7 @@ const ListViewClient = ({ node, clients, onUpdate, onAddChild, onDelete, onTimer
                 <div className="flex items-center gap-1">
                     <button onClick={() => onAddChild(node.id)} className="p-1.5 opacity-60 hover:opacity-100 transition-opacity"><Plus size={16}/></button>
                     <button onClick={() => onDelete(node.id)} className="p-1.5 opacity-60 hover:opacity-100 transition-opacity"><Trash2 size={16}/></button>
-                    <button 
-                        onClick={() => onUpdate(node.id, { expanded: !node.expanded })} 
-                        className="p-1.5 opacity-60 hover:opacity-100 transition-opacity"
-                    >
+                    <button onClick={() => onUpdate(node.id, { expanded: !node.expanded })} className="p-1.5 opacity-60 hover:opacity-100 transition-opacity">
                          {node.expanded ? <ChevronDown size={18} /> : <ChevronLeft size={18} />}
                     </button>
                 </div>
@@ -351,43 +382,61 @@ const ListViewClient = ({ node, clients, onUpdate, onAddChild, onDelete, onTimer
                              activeTimers={activeTimers} 
                              isDarkMode={isDarkMode}
                              onInspect={onInspect}
+                             focusId={focusId}
                          />
                      ))}
-                     {(!node.children || node.children.length === 0) && (
-                         <div className={`p-3 text-xs italic ${isDarkMode ? 'text-stone-600' : 'text-stone-400'}`}>No tasks yet.</div>
-                     )}
+                     {(!node.children || node.children.length === 0) && <div className={`p-3 text-xs italic ${isDarkMode ? 'text-stone-600' : 'text-stone-400'}`}>No tasks yet.</div>}
                 </div>
             )}
         </div>
     )
 }
 
-const TaskNode = ({ node, onUpdate, onAddChild, onDelete, onTimerToggle, activeTimers, direction, isDarkMode, onInspect }) => {
+const TaskNode = ({ node, onUpdate, onAddChild, onDelete, onTimerToggle, activeTimers, direction, isDarkMode, onInspect, focusId }) => {
     if (!node) return null;
     const isRunning = activeTimers.includes(node.id);
+    const daysOld = getTaskAge(node.createdAt);
+    const isStale = !node.completed && daysOld > 7;
+    const isMidStale = !node.completed && daysOld > 3;
+
+    const isFocused = focusId && focusId === node.id;
+    const isDimmed = focusId && !isFocused;
+
+    const staleBorder = isStale ? 'border-amber-400 shadow-amber-500/20' : '';
     const baseCard = isDarkMode ? 'bg-stone-800 border-stone-700 shadow-stone-900/20' : 'bg-stone-50 border-stone-300 shadow-sm';
-    const focusRing = 'focus-within:ring-2 focus-within:ring-teal-500 focus-within:border-transparent';
+    const focusRing = isFocused ? 'ring-4 ring-indigo-500 border-transparent shadow-2xl scale-110 z-50' : 'focus-within:ring-2 focus-within:ring-teal-500 focus-within:border-transparent';
     const inputColor = isDarkMode ? 'text-stone-200 placeholder-stone-600' : 'text-stone-800 placeholder-stone-400';
     const completedText = isDarkMode ? 'line-through text-stone-600' : 'line-through text-stone-400';
     
+    const wrapperStyle = {
+        transition: 'all 0.5s ease',
+        opacity: isDimmed ? 0.1 : 1,
+        filter: isDimmed ? 'grayscale(100%) blur(1px)' : 'none',
+        pointerEvents: isDimmed ? 'none' : 'auto'
+    };
+
     return (
-        <div className={`mm-child-${direction}`}>
+        <div className={`mm-child-${direction}`} style={wrapperStyle}>
             <div 
-                className={`flex flex-col gap-1 p-3 rounded-xl border shadow-sm relative z-20 shrink-0 w-56 transition-all ${focusRing} ${node.completed ? 'opacity-60 grayscale' : ''} ${baseCard}`}
+                className={`flex flex-col gap-1 p-3 rounded-xl border shadow-sm relative z-20 shrink-0 w-56 transition-all ${focusRing} ${staleBorder} ${node.completed ? 'opacity-60 grayscale' : ''} ${baseCard}`}
+                onMouseDown={(e) => e.stopPropagation()} 
+                onTouchStart={(e) => e.stopPropagation()} 
             >
                 <div className="flex w-full items-center gap-2">
                     <button onClick={(e) => { e.stopPropagation(); onUpdate(node.id, { completed: !node.completed }); }} className={`w-5 h-5 flex-shrink-0 rounded-md border flex items-center justify-center transition-colors ${node.completed ? 'bg-teal-600 border-teal-600 text-white' : 'border-stone-400 bg-transparent hover:border-teal-500'}`}>
                         {node.completed && <Check size={12} strokeWidth={4} />}
                     </button>
-                    {/* Inline Input for Task Title */}
-                    <input 
-                        type="text" 
-                        value={node.text} 
-                        onChange={(e) => onUpdate(node.id, { text: e.target.value })} 
-                        className={`bg-transparent outline-none flex-1 text-sm font-semibold ${node.completed ? completedText : inputColor}`} 
-                        placeholder="Task..." 
-                    />
+                    <input type="text" value={node.text} onChange={(e) => onUpdate(node.id, { text: e.target.value })} className={`bg-transparent outline-none flex-1 text-sm font-semibold ${node.completed ? completedText : inputColor}`} placeholder="Task..." />
                 </div>
+                
+                {isMidStale && !node.completed && (
+                    <div className="flex items-center gap-1 mt-1">
+                         <div className={`text-[10px] px-1.5 rounded-full flex items-center gap-1 ${isStale ? 'bg-amber-100 text-amber-700' : 'bg-stone-200 text-stone-500'}`}>
+                            <Clock size={10} /> <span>{daysOld} days old</span>
+                         </div>
+                    </div>
+                )}
+
                 <div className={`flex items-center justify-between w-full pt-2 border-t mt-1 ${isDarkMode ? 'border-stone-700' : 'border-stone-200/60'}`}>
                     <Timer isRunning={isRunning} timeSpent={node.timeSpent} onToggle={() => onTimerToggle(node.id)} isDarkMode={isDarkMode} />
                     <div className="flex items-center gap-1">
@@ -405,7 +454,7 @@ const TaskNode = ({ node, onUpdate, onAddChild, onDelete, onTimerToggle, activeT
             {node.expanded && node.children && node.children.length > 0 && (
                 <div className={`mm-children-${direction}`}>
                     {node.children.map(child => (
-                        <TaskNode key={child.id} node={child} onUpdate={onUpdate} onAddChild={onAddChild} onDelete={onDelete} onTimerToggle={onTimerToggle} activeTimers={activeTimers} direction={direction} isDarkMode={isDarkMode} onInspect={onInspect} />
+                        <TaskNode key={child.id} node={child} onUpdate={onUpdate} onAddChild={onAddChild} onDelete={onDelete} onTimerToggle={onTimerToggle} activeTimers={activeTimers} direction={direction} isDarkMode={isDarkMode} onInspect={onInspect} focusId={focusId} />
                     ))}
                 </div>
             )}
@@ -413,12 +462,21 @@ const TaskNode = ({ node, onUpdate, onAddChild, onDelete, onTimerToggle, activeT
     );
 };
 
-const ClientNode = ({ node, direction, clients, onUpdate, onAddChild, onDelete, onTimerToggle, activeTimers, openClientManager, isDarkMode, onInspect }) => {
+const ClientNode = ({ node, direction, clients, onUpdate, onAddChild, onDelete, onTimerToggle, activeTimers, openClientManager, isDarkMode, onInspect, focusId }) => {
     if (!node) return null;
     const client = (clients && clients.length > 0) ? (clients.find(c => c.id === node.clientId) || clients[0]) : { color: 'stone' };
     const themeClass = getThemeClasses(client.color, isDarkMode);
-    
     const optionClass = isDarkMode ? "bg-stone-800 text-stone-200" : "bg-white text-stone-800";
+    
+    const containsFocus = focusId ? (JSON.stringify(node).includes(focusId)) : true;
+    const isDimmed = focusId && !containsFocus;
+    
+    const wrapperStyle = {
+        transition: 'all 0.5s ease',
+        opacity: isDimmed ? 0.1 : 1,
+        filter: isDimmed ? 'grayscale(100%) blur(1px)' : 'none',
+        pointerEvents: isDimmed ? 'none' : 'auto'
+    };
 
     const handleClientChange = (e) => {
         if (e.target.value === 'ADD_NEW') openClientManager();
@@ -426,26 +484,18 @@ const ClientNode = ({ node, direction, clients, onUpdate, onAddChild, onDelete, 
     };
 
     return (
-        <div className={`mm-child-${direction}`}>
-            <div className={`relative z-20 px-4 py-2.5 rounded-full shadow-md border-2 flex items-center gap-2 transition-all hover:scale-[1.02] shrink-0 min-w-[170px] ${themeClass}`}>
-                {/* Logo Logic */}
-                {client.logo ? (
-                    <img src={client.logo} alt="Logo" className="w-5 h-5 rounded object-cover border border-current/20 flex-shrink-0" />
-                ) : (
-                    <Briefcase size={18} className="opacity-80 flex-shrink-0" />
-                )}
-                
-                {/* Dropdown for Client Selection */}
-                <select 
-                    value={node.clientId} 
-                    onChange={handleClientChange} 
-                    className="bg-transparent font-bold text-sm outline-none cursor-pointer appearance-none truncate flex-1 text-center"
-                >
+        <div className={`mm-child-${direction}`} style={wrapperStyle}>
+            <div 
+                className={`relative z-20 px-4 py-2.5 rounded-full shadow-md border-2 flex items-center gap-2 transition-all hover:scale-[1.02] shrink-0 min-w-[170px] ${themeClass}`}
+                onMouseDown={(e) => e.stopPropagation()} 
+                onTouchStart={(e) => e.stopPropagation()} 
+            >
+                {client.logo ? <img src={client.logo} alt="Logo" className="w-5 h-5 rounded object-cover border border-current/20 flex-shrink-0" /> : <Briefcase size={18} className="opacity-80 flex-shrink-0" />}
+                <select value={node.clientId} onChange={handleClientChange} className="bg-transparent font-bold text-sm outline-none cursor-pointer appearance-none truncate flex-1 text-center">
                     {clients && clients.map(c => <option key={c.id} value={c.id} className={optionClass}>{c.name}</option>)}
                     <option disabled className={optionClass}>──────────</option>
                     <option value="ADD_NEW" className={optionClass}>+ Add New...</option>
                 </select>
-                
                 <div className="flex gap-1 border-l pl-2 border-current/20">
                     <button onClick={(e) => { e.stopPropagation(); onAddChild(node.id); }} className="opacity-60 hover:opacity-100"><Plus size={16}/></button>
                     {node.children && node.children.length > 0 && (
@@ -459,7 +509,7 @@ const ClientNode = ({ node, direction, clients, onUpdate, onAddChild, onDelete, 
             {node.expanded && node.children && node.children.length > 0 && (
                 <div className={`mm-children-${direction}`}>
                     {node.children.map(child => (
-                        <TaskNode key={child.id} node={child} onUpdate={onUpdate} onAddChild={onAddChild} onDelete={onDelete} onTimerToggle={onTimerToggle} activeTimers={activeTimers} direction={direction} isDarkMode={isDarkMode} onInspect={onInspect} />
+                        <TaskNode key={child.id} node={child} onUpdate={onUpdate} onAddChild={onAddChild} onDelete={onDelete} onTimerToggle={onTimerToggle} activeTimers={activeTimers} direction={direction} isDarkMode={isDarkMode} onInspect={onInspect} focusId={focusId} />
                     ))}
                 </div>
             )}
@@ -467,18 +517,27 @@ const ClientNode = ({ node, direction, clients, onUpdate, onAddChild, onDelete, 
     );
 };
 
-const AddTaskModal = ({ isOpen, onClose, clients, tasks, onAdd, isDarkMode }) => {
-    const [title, setTitle] = useState('');
+const AddTaskModal = ({ isOpen, onClose, clients, tasks, onAdd, isDarkMode, onSwitchToClientManager, initialTitle }) => {
+    const [title, setTitle] = useState(initialTitle || '');
     const [selectedClient, setSelectedClient] = useState('');
     const [selectedParent, setSelectedParent] = useState('ROOT');
 
     useEffect(() => {
         if (isOpen && clients.length > 0) {
-            setSelectedClient(clients[0].id);
-            setSelectedParent('ROOT');
-            setTitle('');
+            // Only auto-select if we have clients
+            if (!selectedClient) setSelectedClient(clients[0].id);
+            if (!selectedParent) setSelectedParent('ROOT');
+            // Only reset if no initial title was passed (fresh open)
+            if (initialTitle === undefined) setTitle('');
+        } else if (isOpen && clients.length === 0) {
+            setSelectedClient(''); 
         }
-    }, [isOpen, clients]);
+    }, [isOpen, clients, initialTitle]);
+    
+    // If initialTitle changes (return from client manager), update local state
+    useEffect(() => {
+        if (initialTitle) setTitle(initialTitle);
+    }, [initialTitle]);
 
     if (!isOpen) return null;
 
@@ -504,13 +563,17 @@ const AddTaskModal = ({ isOpen, onClose, clients, tasks, onAdd, isDarkMode }) =>
 
     const handleSubmit = () => {
         if (!title.trim()) return;
+        
         let targetParentId = selectedParent;
         
-        // Logic for handling target parent
-        if (parentOptions.length === 0) {
-            targetParentId = null; // New client node needed
-        } else if (selectedParent === 'ROOT') {
-            targetParentId = parentOptions[0].id; // Use existing client root
+        // Determine if we are adding to an existing Root
+        if (selectedParent === 'ROOT') {
+            const existingRoot = tasks.find(t => t.type === 'client' && t.clientId === selectedClient);
+            if (existingRoot) {
+                targetParentId = existingRoot.id;
+            } else {
+                targetParentId = null; // Needs new client node
+            }
         }
 
         onAdd(targetParentId, { text: title, clientId: selectedClient });
@@ -526,10 +589,25 @@ const AddTaskModal = ({ isOpen, onClose, clients, tasks, onAdd, isDarkMode }) =>
             <div className={`w-full max-w-md rounded-t-2xl sm:rounded-2xl shadow-2xl overflow-hidden ${isDarkMode ? 'bg-stone-900 border-stone-800' : 'bg-white'}`}>
                 <div className={`p-4 border-b flex justify-between items-center ${isDarkMode ? 'border-stone-800' : 'border-stone-100'}`}><h3 className={`font-bold flex items-center gap-2 ${isDarkMode ? 'text-stone-200' : 'text-stone-800'}`}><MessageSquarePlus size={20} className="text-teal-500"/> New Task</h3><button onClick={onClose}><X size={20}/></button></div>
                 <div className="p-6 space-y-5">
-                    <div><label className={labelClass}>Project / Client</label><select value={selectedClient} onChange={e => setSelectedClient(e.target.value)} className={inputClass}>{clients.map(c => <option key={c.id} value={c.id} className={optionClass}>{c.name}</option>)}</select></div>
-                    <div><label className={labelClass}>Parent Task</label><select value={selectedParent} onChange={e => setSelectedParent(e.target.value)} className={inputClass} disabled={parentOptions.length === 0}>{parentOptions.length === 0 ? <option value="ROOT" className={optionClass}>New Root Branch</option> : parentOptions.map(opt => <option key={opt.id} value={opt.id} className={optionClass}>{'\u00A0'.repeat(opt.depth * 3)} {opt.depth > 0 ? '└ ' : ''} {opt.label}</option>)}</select></div>
+                    <div>
+                        <label className={labelClass}>Project / Client</label>
+                        <select 
+                            value={selectedClient} 
+                            onChange={e => {
+                                if (e.target.value === 'ADD_NEW') onSwitchToClientManager(title);
+                                else setSelectedClient(e.target.value);
+                            }} 
+                            className={inputClass}
+                        >
+                             {/* FIX: Default disabled option forces a change event when selecting "Add New" */}
+                            <option value="" disabled className={optionClass}>Select Project...</option>
+                            {clients.map(c => <option key={c.id} value={c.id} className={optionClass}>{c.name}</option>)}
+                            <option value="ADD_NEW" className={optionClass}>+ Add New...</option>
+                        </select>
+                    </div>
+                    <div><label className={labelClass}>Parent Task</label><select value={selectedParent} onChange={e => setSelectedParent(e.target.value)} className={inputClass} disabled={parentOptions.length === 0 || !selectedClient}>{parentOptions.length === 0 ? <option value="ROOT" className={optionClass}>New Root Branch</option> : parentOptions.map(opt => <option key={opt.id} value={opt.id} className={optionClass}>{'\u00A0'.repeat(opt.depth * 3)} {opt.depth > 0 ? '└ ' : ''} {opt.label}</option>)}</select></div>
                     <div><label className={labelClass}>Task Title</label><input autoFocus type="text" value={title} onChange={e => setTitle(e.target.value)} placeholder="What needs to be done?" className={inputClass} onKeyDown={e => e.key === 'Enter' && handleSubmit()} /></div>
-                    <button onClick={handleSubmit} disabled={!title.trim()} className="w-full py-3.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold shadow-lg shadow-teal-900/20 transition-all disabled:opacity-50">Create Task</button>
+                    <button onClick={handleSubmit} disabled={!title.trim() || !selectedClient} className="w-full py-3.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold shadow-lg shadow-teal-900/20 transition-all disabled:opacity-50">Create Task</button>
                 </div>
             </div>
         </div>
@@ -555,6 +633,7 @@ const InspectorPanel = ({ node, onUpdate, onDelete, isDarkMode, clients, onExpor
 };
 
 const ReportModal = ({ isOpen, onClose, data, clients, isDarkMode }) => {
+    // ... [Report Modal logic preserved] ...
     const formatLocalDate = (date) => { const y = date.getFullYear(); const m = String(date.getMonth() + 1).padStart(2, '0'); const d = String(date.getDate()).padStart(2, '0'); return `${y}-${m}-${d}`; };
     const getFirstDay = () => { const d = new Date(); return formatLocalDate(new Date(d.getFullYear(), d.getMonth(), 1)); };
     const getLastDay = () => { const d = new Date(); return formatLocalDate(new Date(d.getFullYear(), d.getMonth() + 1, 0)); };
@@ -630,7 +709,8 @@ const ClientManagerModal = ({ isOpen, onClose, clients, setClients, isDarkMode }
     const handleDelete = (id) => { if (clients.length <= 1) { alert("You need at least one client."); return; } setClients(clients.filter(c => c.id !== id)); };
     const colorOptions = Object.keys(THEME_COLORS).map(key => ({ key, previewClass: THEME_COLORS[key].preview }));
     return (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4" onWheel={e => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()} onTouchStart={(e) => e.stopPropagation()}>
+        // Z-Index boosted to 200 to override Add Task modal if opened
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[200] flex items-center justify-center p-4" onWheel={e => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()} onTouchStart={(e) => e.stopPropagation()}>
             <div className={`rounded-2xl shadow-2xl w-full max-w-md overflow-hidden ${isDarkMode ? 'bg-stone-900 border-stone-800' : 'bg-white'}`}>
                 <div className="p-4 border-b border-stone-200/10 flex justify-between items-center"><h3 className={`font-bold flex gap-2 ${isDarkMode ? 'text-stone-200' : 'text-stone-800'}`}><Users size={18}/> Clients</h3><button onClick={onClose}><X size={18} className="text-stone-400"/></button></div>
                 <div className="p-6 space-y-6">
@@ -655,12 +735,18 @@ const NeuroFlowApp = () => {
   const [data, setData] = useState(INITIAL_DATA);
   const [clients, setClients] = useState(INITIAL_CLIENTS);
   const [activeTimers, setActiveTimers] = useState([]);
+  const [focusId, setFocusId] = useState(null); 
   
   // UI State
-  const [viewMode, setViewMode] = useState('map'); // 'map' or 'list'
+  const [viewMode, setViewMode] = useState('map'); 
   const [showClientManager, setShowClientManager] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
   const [showAddTaskModal, setShowAddTaskModal] = useState(false);
+  
+  // New state to track return flow
+  const [draftTitle, setDraftTitle] = useState('');
+  const [returnToTask, setReturnToTask] = useState(false);
+
   const [inspectedNode, setInspectedNode] = useState(null);
   const [view, setView] = useState({ x: 0, y: 0, scale: 0.8 }); 
   const [isDragging, setIsDragging] = useState(false);
@@ -803,94 +889,67 @@ const NeuroFlowApp = () => {
   };
 
   const addChild = (parentId, initialData = {}) => {
-    // CASE 1: Adding a Sub-Task (Parent is known)
-    if (parentId !== null) {
-        const newNode = {
-            id: generateId(), 
-            text: initialData.text || '', 
-            type: 'task', 
-            completed: false, 
-            expanded: true, 
-            timeSpent: 0, 
-            sessions: [], 
-            children: []
-        };
-        
-        const addRecursive = (nodes) => nodes.map(node => {
-          if (node.id === parentId) return { ...node, expanded: true, children: [...node.children, newNode] };
+    let targetId = parentId;
+    
+    // CASE A: Add Task from Modal (specific client requested)
+    if (targetId === null && initialData.clientId) {
+        // Look for existing node for this client
+        const existingNode = data.tasks.find(n => n.type === 'client' && n.clientId === initialData.clientId);
+        if (existingNode) {
+            // Found it, so we are actually adding a task to this existing client node
+            targetId = existingNode.id;
+        }
+        // If not found, targetId remains null, meaning we create a new Client Node + Task
+    }
+
+    // CASE B: Generic Add (Central Button) - No specific client
+    // We want to find the next available client
+    if (targetId === null && !initialData.clientId) {
+         const usedClientIds = data.tasks.filter(t => t.type === 'client').map(t => t.clientId);
+         const nextClient = clients.find(c => !usedClientIds.includes(c.id));
+         
+         if (nextClient) {
+             // We found an unused client. We will create a new Client Node for them.
+             // We inject the clientId into initialData so the creation logic below picks it up
+             initialData.clientId = nextClient.id; 
+         } else {
+             // No unused clients. Open manager.
+             setShowClientManager(true);
+             return;
+         }
+    }
+    
+    const isRootAdd = targetId === null;
+    const newNode = {
+      id: generateId(), 
+      text: initialData.text || '', 
+      type: isRootAdd ? 'client' : 'task', 
+      completed: false, 
+      expanded: true, 
+      timeSpent: 0, 
+      sessions: [],
+      createdAt: new Date().toISOString(), 
+      clientId: isRootAdd ? (initialData.clientId || clients[0].id) : null, 
+      children: []
+    };
+
+    if (isRootAdd) {
+        if (initialData.text) {
+             newNode.children = [{ id: generateId(), text: initialData.text, type: 'task', completed: false, expanded: true, timeSpent: 0, sessions: [], createdAt: new Date().toISOString(), children: [] }];
+        } else {
+             newNode.children.push({ id: generateId(), text: '', type: 'task', completed: false, expanded: true, timeSpent: 0, sessions: [], createdAt: new Date().toISOString(), children: [] });
+        }
+        setData(prev => ({ ...prev, tasks: [...(prev.tasks || []), newNode] }));
+    } else {
+      const taskNode = isRootAdd ? null : {
+          id: generateId(), text: initialData.text || '', type: 'task', completed: false, expanded: true, timeSpent: 0, sessions: [], createdAt: new Date().toISOString(), children: []
+      };
+      const addRecursive = (nodes) => nodes.map(node => {
+          if (node.id === targetId) return { ...node, expanded: true, children: [...node.children, taskNode || newNode] };
           if (node.children) return { ...node, children: addRecursive(node.children) };
           return node;
-        });
-        setData(prev => ({ ...prev, tasks: addRecursive(prev.tasks || []) }));
-        return;
-    }
-
-    // CASE 2: Adding a Root Node (Parent is null)
-    
-    // Sub-case 2A: Specific Client Requested (e.g. from Add Task Modal)
-    if (initialData.clientId) {
-        // Check if this client already exists on canvas
-        const existingNode = data.tasks.find(n => n.type === 'client' && n.clientId === initialData.clientId);
-        
-        if (existingNode) {
-            // Append task to existing client node
-            const newTask = {
-                 id: generateId(), 
-                 text: initialData.text || '', 
-                 type: 'task', 
-                 completed: false, 
-                 expanded: true, 
-                 timeSpent: 0, 
-                 sessions: [], 
-                 children: []
-            };
-            const addRecursive = (nodes) => nodes.map(node => {
-                if (node.id === existingNode.id) return { ...node, expanded: true, children: [...node.children, newTask] };
-                return node;
-            });
-            setData(prev => ({ ...prev, tasks: addRecursive(prev.tasks || []) }));
-        } else {
-            // Create new client node
-            const newClientNode = {
-                id: generateId(), 
-                text: '', 
-                type: 'client', 
-                completed: false, 
-                expanded: true, 
-                timeSpent: 0, 
-                sessions: [], 
-                clientId: initialData.clientId, 
-                children: [
-                    { id: generateId(), text: initialData.text || '', type: 'task', completed: false, expanded: true, timeSpent: 0, sessions: [], children: [] }
-                ]
-            };
-            setData(prev => ({ ...prev, tasks: [...(prev.tasks || []), newClientNode] }));
-        }
-        return;
-    }
-
-    // Sub-case 2B: Generic Add (Central Hub Button) - "Next Available" Logic
-    const usedClientIds = data.tasks.filter(t => t.type === 'client').map(t => t.clientId);
-    const nextClient = clients.find(c => !usedClientIds.includes(c.id));
-
-    if (nextClient) {
-         const newClientNode = {
-            id: generateId(), 
-            text: '', 
-            type: 'client', 
-            completed: false, 
-            expanded: true, 
-            timeSpent: 0, 
-            sessions: [], 
-            clientId: nextClient.id, 
-            children: [
-                { id: generateId(), text: '', type: 'task', completed: false, expanded: true, timeSpent: 0, sessions: [], children: [] }
-            ]
-        };
-        setData(prev => ({ ...prev, tasks: [...(prev.tasks || []), newClientNode] }));
-    } else {
-        // No unused clients left (or list empty) -> Open Manager
-        setShowClientManager(true);
+      });
+      setData(prev => ({ ...prev, tasks: addRecursive(prev.tasks || []) }));
     }
   };
 
@@ -909,13 +968,61 @@ const NeuroFlowApp = () => {
   };
   const weekData = getCurrentWeekLabel();
 
+  // --- Modal Logic with Context Switching ---
+  const handleSwitchToClientManager = (currentTitle) => {
+      setDraftTitle(currentTitle);
+      setReturnToTask(true);
+      setShowAddTaskModal(false);
+      setShowClientManager(true);
+  };
+
+  const handleClientManagerClose = () => {
+      setShowClientManager(false);
+      if (returnToTask) {
+          setShowAddTaskModal(true);
+          setReturnToTask(false);
+      }
+  };
+
+  const handleFocus = () => {
+      if (focusId) { setFocusId(null); return; }
+      const debtTasks = [];
+      const collectDebt = (nodes) => {
+          nodes.forEach(n => {
+              if (n.type === 'task' && !n.completed) {
+                  const age = getTaskAge(n.createdAt);
+                  if (age > 3) debtTasks.push(n);
+              }
+              if (n.children) collectDebt(n.children);
+          });
+      };
+      if (data.tasks) collectDebt(data.tasks);
+      if (debtTasks.length > 0) {
+          const randomTask = debtTasks[Math.floor(Math.random() * debtTasks.length)];
+          setFocusId(randomTask.id);
+      } else {
+          const allTasks = [];
+          const collectAll = (nodes) => {
+               nodes.forEach(n => {
+                  if (n.type === 'task' && !n.completed) allTasks.push(n);
+                  if (n.children) collectAll(n.children);
+              });
+          };
+          if (data.tasks) collectAll(data.tasks);
+          if (allTasks.length > 0) {
+               const randomTask = allTasks[Math.floor(Math.random() * allTasks.length)];
+               setFocusId(randomTask.id);
+          } else { alert("No tasks to focus on! Great job."); }
+      }
+  };
+
   // --- Interactions ---
   const handleTouchStart = (e) => { if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return; const touch = e.touches[0]; setIsDragging(true); setLastMouse({ x: touch.clientX, y: touch.clientY }); };
   const handleTouchMove = (e) => { if (!isDragging) return; const touch = e.touches[0]; const dx = touch.clientX - lastMouse.x; const dy = touch.clientY - lastMouse.y; setLastMouse({ x: touch.clientX, y: touch.clientY }); setView(prev => ({ ...prev, x: prev.x + dx, y: prev.y + dy })); };
   const handleMouseDown = (e) => { if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return; setIsDragging(true); setLastMouse({ x: e.clientX, y: e.clientY }); };
   const handleMouseMove = (e) => { if (!isDragging) return; const dx = e.clientX - lastMouse.x; const dy = e.clientY - lastMouse.y; setLastMouse({ x: e.clientX, y: e.clientY }); setView(prev => ({ ...prev, x: prev.x + dx, y: prev.y + dy })); };
 
-  // --- Filtering & Tree Building ---
+  // --- Filtering ---
   const filterIncompleteTree = (nodes) => {
       return nodes.reduce((acc, node) => {
           const filteredChildren = filterIncompleteTree(node.children || []);
@@ -927,11 +1034,9 @@ const NeuroFlowApp = () => {
           return acc;
       }, []);
   };
-
   const displayNodes = data?.weekOffset > 0 ? filterIncompleteTree(data.tasks || []) : (data.tasks || []);
   const leftNodes = displayNodes.filter((_, i) => i % 2 !== 0);
   const rightNodes = displayNodes.filter((_, i) => i % 2 === 0);
-
   const controlBtnClass = `p-3 rounded-full shadow-md border transition-colors ${isDarkMode ? 'bg-stone-800 border-stone-700 text-stone-400 hover:text-stone-200 hover:bg-stone-700' : 'bg-stone-50 border-stone-200 text-stone-600 hover:bg-stone-100'}`;
 
   return (
@@ -954,12 +1059,9 @@ const NeuroFlowApp = () => {
 
       {/* Top Right Controls */}
       <div className="absolute top-16 right-6 z-[90] flex flex-col gap-3" onMouseDown={e => e.stopPropagation()} onTouchStart={e => e.stopPropagation()}>
-         <button onClick={() => setViewMode(viewMode === 'map' ? 'list' : 'map')} className={controlBtnClass} title={viewMode === 'map' ? 'Switch to List' : 'Switch to Map'}>
-             {viewMode === 'map' ? <List size={20} /> : <Share2 size={20} />}
-         </button>
-         <button onClick={() => setIsDarkMode(!isDarkMode)} className={controlBtnClass} title="Toggle Theme">
-             {isDarkMode ? <Sun size={20} /> : <Moon size={20} />}
-         </button>
+         <button onClick={handleFocus} className={`${controlBtnClass} ${focusId ? 'bg-amber-100 text-amber-600 border-amber-300 ring-2 ring-amber-400' : ''}`} title="Focus Mode"><Zap size={20} className={focusId ? 'fill-current animate-pulse' : ''} /></button>
+         <button onClick={() => setViewMode(viewMode === 'map' ? 'list' : 'map')} className={controlBtnClass} title={viewMode === 'map' ? 'Switch to List' : 'Switch to Map'}>{viewMode === 'map' ? <List size={20} /> : <Share2 size={20} />}</button>
+         <button onClick={() => setIsDarkMode(!isDarkMode)} className={controlBtnClass} title="Toggle Theme">{isDarkMode ? <Sun size={20} /> : <Moon size={20} />}</button>
          {viewMode === 'map' && <button onClick={() => setView({x:0, y:0, scale: 0.8})} className={controlBtnClass} title="Reset View"><Maximize size={20} /></button>}
          <button onClick={() => setShowReportModal(true)} className={controlBtnClass} title="Export Time Report"><FileText size={20} /></button>
          <button onClick={() => setShowClientManager(true)} className={controlBtnClass} title="Manage Clients"><UserPlus size={20} /></button>
@@ -971,11 +1073,14 @@ const NeuroFlowApp = () => {
             <div className="flex items-center justify-center min-w-max min-h-max p-32">
                 <div className="flex items-center mr-6 relative">
                     <div className="mm-children-left pr-12">
-                        {leftNodes.map(node => <ClientNode key={node.id} node={node} direction="left" clients={clients} onUpdate={updateNode} onAddChild={addChild} onDelete={deleteNode} onTimerToggle={handleTimerToggle} activeTimers={activeTimers} openClientManager={() => setShowClientManager(true)} isDarkMode={isDarkMode} onInspect={setInspectedNode} />)}
+                        {leftNodes.map(node => <ClientNode key={node.id} node={node} direction="left" clients={clients} onUpdate={updateNode} onAddChild={addChild} onDelete={deleteNode} onTimerToggle={handleTimerToggle} activeTimers={activeTimers} openClientManager={() => setShowClientManager(true)} isDarkMode={isDarkMode} onInspect={setInspectedNode} focusId={focusId} />)}
                     </div>
                 </div>
                 {/* Central Hub */}
-                <div className={`relative z-[60] w-64 h-64 rounded-full shadow-[0_0_40px_rgba(0,0,0,0.1)] border-[6px] flex flex-col items-center justify-center group select-none shrink-0 transition-colors ${isDarkMode ? 'bg-stone-800 border-stone-900' : 'bg-stone-50 border-white'}`} onMouseDown={e => e.stopPropagation()}>
+                <div 
+                    className={`relative z-[60] w-64 h-64 rounded-full shadow-[0_0_40px_rgba(0,0,0,0.1)] border-[6px] flex flex-col items-center justify-center group select-none shrink-0 transition-colors ${isDarkMode ? 'bg-stone-800 border-stone-900' : 'bg-stone-50 border-white'} ${focusId ? 'opacity-20 blur-sm' : 'opacity-100'}`} 
+                    onMouseDown={e => e.stopPropagation()}
+                >
                     <div className={`absolute -inset-4 border-2 border-dashed rounded-full animate-[spin_60s_linear_infinite] pointer-events-none ${isDarkMode ? 'border-stone-700' : 'border-stone-300/60'}`}></div>
                     <div className="text-center z-10">
                         <div className={`text-xs font-bold uppercase tracking-widest mb-1.5 ${isDarkMode ? 'text-stone-500' : 'text-stone-400'}`}>Current Week</div>
@@ -991,7 +1096,7 @@ const NeuroFlowApp = () => {
                 </div>
                 <div className="flex items-center ml-6 relative">
                     <div className="mm-children-right pl-12">
-                        {rightNodes.map(node => <ClientNode key={node.id} node={node} direction="right" clients={clients} onUpdate={updateNode} onAddChild={addChild} onDelete={deleteNode} onTimerToggle={handleTimerToggle} activeTimers={activeTimers} openClientManager={() => setShowClientManager(true)} isDarkMode={isDarkMode} onInspect={setInspectedNode} />)}
+                        {rightNodes.map(node => <ClientNode key={node.id} node={node} direction="right" clients={clients} onUpdate={updateNode} onAddChild={addChild} onDelete={deleteNode} onTimerToggle={handleTimerToggle} activeTimers={activeTimers} openClientManager={() => setShowClientManager(true)} isDarkMode={isDarkMode} onInspect={setInspectedNode} focusId={focusId} />)}
                     </div>
                 </div>
             </div>
@@ -1022,6 +1127,7 @@ const NeuroFlowApp = () => {
                           openClientManager={() => setShowClientManager(true)} 
                           isDarkMode={isDarkMode} 
                           onInspect={setInspectedNode} 
+                          focusId={focusId}
                       />
                   ))}
                   {displayNodes.length === 0 && <div className="text-center text-stone-500 py-10">No tasks for this week.</div>}
@@ -1037,10 +1143,21 @@ const NeuroFlowApp = () => {
         <Plus size={32} />
       </button>
 
-      <ClientManagerModal isOpen={showClientManager} onClose={() => setShowClientManager(false)} clients={clients} setClients={setClients} isDarkMode={isDarkMode} />
       <ReportModal isOpen={showReportModal} onClose={() => setShowReportModal(false)} data={data} clients={clients} isDarkMode={isDarkMode} />
-      <AddTaskModal isOpen={showAddTaskModal} onClose={() => setShowAddTaskModal(false)} clients={clients} tasks={data.tasks} onAdd={addChild} isDarkMode={isDarkMode} />
+      <AddTaskModal 
+          isOpen={showAddTaskModal} 
+          onClose={() => setShowAddTaskModal(false)} 
+          clients={clients} 
+          tasks={data.tasks} 
+          onAdd={addChild} 
+          isDarkMode={isDarkMode} 
+          onSwitchToClientManager={handleSwitchToClientManager} 
+          initialTitle={draftTitle} 
+      />
       
+      {/* Client Manager last in DOM for stacking */}
+      <ClientManagerModal isOpen={showClientManager} onClose={handleClientManagerClose} clients={clients} setClients={setClients} isDarkMode={isDarkMode} />
+
       {inspectedNode && <InspectorPanel node={inspectedNode} onUpdate={updateNode} onDelete={deleteNode} isDarkMode={isDarkMode} clients={clients} onExportCalendar={exportToCalendar} onClose={() => setInspectedNode(null)} />}
       
       {deleteTarget && (
