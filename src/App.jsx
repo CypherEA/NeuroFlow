@@ -31,7 +31,8 @@ import {
   List,
   Share2,
   Zap, 
-  Clock
+  Clock,
+  HelpCircle
 } from 'lucide-react';
 
 // --- Firebase Imports ---
@@ -52,13 +53,9 @@ import {
 } from "firebase/firestore";
 
 /**
- * NeuroFlow Week Planner - V7.1 (Stable Polish)
- * * CORE FEATURES:
- * 1. FreeMind Layout Engine (Left/Right weighted trees)
- * 2. Firestore Cloud Sync & Google Calendar Integration
- * 3. ADHD-Friendly UI (Warm Dark Mode, Task Aging, Focus Mode)
- * 4. Context-Aware Modal Workflow (Task -> Client -> Task)
- * 5. Robust Drag & Drop and Z-Index Stacking
+ * NeuroFlow Week Planner - V7.6 (Fix Missing Modals)
+ * Fixes:
+ * - Restored ReportModal and ClientManagerModal definitions
  */
 
 // --- 0. Firebase Setup ---
@@ -75,7 +72,7 @@ try {
         db = getFirestore(app);
         provider = new GoogleAuthProvider();
         provider.addScope('https://www.googleapis.com/auth/calendar.events');
-         } else {
+    } else {
         if (typeof __firebase_config !== 'undefined') {
              const firebaseConfig = JSON.parse(__firebase_config);
              app = initializeApp(firebaseConfig);
@@ -224,7 +221,7 @@ const TreeStyles = ({ isDarkMode }) => {
 
 // --- 5. Components ---
 
-const TitleBar = ({ user, isDarkMode, loginWithGoogle, logout }) => {
+const TitleBar = ({ user, isDarkMode, loginWithGoogle, logout, onShowHelp }) => {
     return (
         <div 
             className={`fixed top-0 left-0 right-0 h-14 border-b flex items-center justify-between px-4 z-[90] ${isDarkMode ? 'bg-stone-900 border-stone-800' : 'bg-white border-stone-200'}`}
@@ -238,7 +235,16 @@ const TitleBar = ({ user, isDarkMode, loginWithGoogle, logout }) => {
                 <h1 className={`font-bold text-lg tracking-tight ${isDarkMode ? 'text-stone-200' : 'text-stone-800'}`}>NeuroFlow</h1>
             </div>
 
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-3">
+                <button 
+                    onClick={onShowHelp}
+                    className={`p-2 rounded-lg transition-colors ${isDarkMode ? 'text-stone-400 hover:text-stone-200 hover:bg-stone-800' : 'text-stone-500 hover:text-stone-800 hover:bg-stone-100'}`}
+                    title="Help & About"
+                >
+                    <HelpCircle size={20} />
+                </button>
+                <div className={`h-6 w-px mx-1 ${isDarkMode ? 'bg-stone-800' : 'bg-stone-200'}`}></div>
+
                 {user ? (
                     <div className="flex items-center gap-3">
                         <div className="flex flex-col items-end hidden sm:flex">
@@ -395,13 +401,17 @@ const ListViewClient = ({ node, clients, onUpdate, onAddChild, onDelete, onTimer
 const TaskNode = ({ node, onUpdate, onAddChild, onDelete, onTimerToggle, activeTimers, direction, isDarkMode, onInspect, focusId }) => {
     if (!node) return null;
     const isRunning = activeTimers.includes(node.id);
+    
+    // Focus & Aging Logic
     const daysOld = getTaskAge(node.createdAt);
     const isStale = !node.completed && daysOld > 7;
     const isMidStale = !node.completed && daysOld > 3;
 
+    // Focus State
     const isFocused = focusId && focusId === node.id;
     const isDimmed = focusId && !isFocused;
 
+    // Dynamic Styles
     const staleBorder = isStale ? 'border-amber-400 shadow-amber-500/20' : '';
     const baseCard = isDarkMode ? 'bg-stone-800 border-stone-700 shadow-stone-900/20' : 'bg-stone-50 border-stone-300 shadow-sm';
     const focusRing = isFocused ? 'ring-4 ring-indigo-500 border-transparent shadow-2xl scale-110 z-50' : 'focus-within:ring-2 focus-within:ring-teal-500 focus-within:border-transparent';
@@ -524,17 +534,14 @@ const AddTaskModal = ({ isOpen, onClose, clients, tasks, onAdd, isDarkMode, onSw
 
     useEffect(() => {
         if (isOpen && clients.length > 0) {
-            // Only auto-select if we have clients
             if (!selectedClient) setSelectedClient(clients[0].id);
             if (!selectedParent) setSelectedParent('ROOT');
-            // Only reset if no initial title was passed (fresh open)
             if (initialTitle === undefined) setTitle('');
         } else if (isOpen && clients.length === 0) {
             setSelectedClient(''); 
         }
     }, [isOpen, clients, initialTitle]);
     
-    // If initialTitle changes (return from client manager), update local state
     useEffect(() => {
         if (initialTitle) setTitle(initialTitle);
     }, [initialTitle]);
@@ -563,7 +570,6 @@ const AddTaskModal = ({ isOpen, onClose, clients, tasks, onAdd, isDarkMode, onSw
 
     const handleSubmit = () => {
         if (!title.trim()) return;
-        
         let targetParentId = selectedParent;
         
         // Determine if we are adding to an existing Root
@@ -599,7 +605,7 @@ const AddTaskModal = ({ isOpen, onClose, clients, tasks, onAdd, isDarkMode, onSw
                             }} 
                             className={inputClass}
                         >
-                             {/* FIX: Default disabled option forces a change event when selecting "Add New" */}
+                            {/* FIX: Default disabled option forces a change event when selecting "Add New" */}
                             <option value="" disabled className={optionClass}>Select Project...</option>
                             {clients.map(c => <option key={c.id} value={c.id} className={optionClass}>{c.name}</option>)}
                             <option value="ADD_NEW" className={optionClass}>+ Add New...</option>
@@ -633,7 +639,6 @@ const InspectorPanel = ({ node, onUpdate, onDelete, isDarkMode, clients, onExpor
 };
 
 const ReportModal = ({ isOpen, onClose, data, clients, isDarkMode }) => {
-    // ... [Report Modal logic preserved] ...
     const formatLocalDate = (date) => { const y = date.getFullYear(); const m = String(date.getMonth() + 1).padStart(2, '0'); const d = String(date.getDate()).padStart(2, '0'); return `${y}-${m}-${d}`; };
     const getFirstDay = () => { const d = new Date(); return formatLocalDate(new Date(d.getFullYear(), d.getMonth(), 1)); };
     const getLastDay = () => { const d = new Date(); return formatLocalDate(new Date(d.getFullYear(), d.getMonth() + 1, 0)); };
@@ -726,6 +731,47 @@ const ClientManagerModal = ({ isOpen, onClose, clients, setClients, isDarkMode }
     );
 };
 
+// ... [HelpModal component] ...
+const HelpModal = ({ isOpen, onClose, isDarkMode }) => {
+    if (!isOpen) return null;
+    const modalClass = isDarkMode ? 'bg-stone-900 border-stone-800 text-stone-300' : 'bg-white text-stone-600';
+    const headerClass = isDarkMode ? 'border-stone-800 text-stone-200' : 'border-stone-100 text-stone-800';
+    return (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[300] flex items-center justify-center p-4" onClick={onClose}>
+            <div className={`w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col ${modalClass}`} onClick={e => e.stopPropagation()}>
+                <div className={`p-4 border-b flex justify-between items-center ${headerClass}`}>
+                    <h2 className="text-xl font-bold flex items-center gap-2"><HelpCircle size={24} /> NeuroFlow Guide</h2>
+                    <button onClick={onClose}><X size={24} /></button>
+                </div>
+                <div className="p-6 overflow-y-auto space-y-6">
+                    <section>
+                        <h3 className={`font-bold text-lg mb-2 ${isDarkMode ? 'text-teal-400' : 'text-teal-600'}`}>The Philosophy</h3>
+                        <p>NeuroFlow is designed for the ADHD brain. It spatializes time and tasks into a <strong>Mind Map</strong>, reducing the "Wall of Awful" effect of vertical to-do lists. The center is <strong>NOW</strong>. Branches are Projects. Leaves are Tasks.</p>
+                    </section>
+                    <div className="grid sm:grid-cols-2 gap-4">
+                        <div className={`p-4 rounded-xl border ${isDarkMode ? 'bg-stone-800 border-stone-700' : 'bg-stone-50 border-stone-200'}`}>
+                            <h4 className="font-bold mb-2 flex items-center gap-2"><Zap size={16} /> Focus Mode</h4>
+                            <p className="text-sm">Overwhelmed? Click the lightning bolt. The app will dim everything except one random, high-priority task to help you break paralysis.</p>
+                        </div>
+                        <div className={`p-4 rounded-xl border ${isDarkMode ? 'bg-stone-800 border-stone-700' : 'bg-stone-50 border-stone-200'}`}>
+                            <h4 className="font-bold mb-2 flex items-center gap-2"><Clock size={16} /> Visual Aging</h4>
+                            <p className="text-sm">Tasks older than 3 days get a subtle clock icon. Tasks older than 7 days get an amber border. No shame, just awareness.</p>
+                        </div>
+                        <div className={`p-4 rounded-xl border ${isDarkMode ? 'bg-stone-800 border-stone-700' : 'bg-stone-50 border-stone-200'}`}>
+                            <h4 className="font-bold mb-2 flex items-center gap-2"><CalendarCheck size={16} /> Calendar Sync</h4>
+                            <p className="text-sm">Click the calendar icon on any task to push it to your Google Calendar. Requires Google Sign-In.</p>
+                        </div>
+                         <div className={`p-4 rounded-xl border ${isDarkMode ? 'bg-stone-800 border-stone-700' : 'bg-stone-50 border-stone-200'}`}>
+                            <h4 className="font-bold mb-2 flex items-center gap-2"><BrainCircuit size={16} /> Smart Add</h4>
+                            <p className="text-sm">The central <strong>+</strong> button auto-selects the next empty client. The floating <strong>+</strong> lets you add tasks to any project quickly.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}
+
 // --- 6. Main App Component ---
 
 const NeuroFlowApp = () => {
@@ -742,6 +788,7 @@ const NeuroFlowApp = () => {
   const [showClientManager, setShowClientManager] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
   const [showAddTaskModal, setShowAddTaskModal] = useState(false);
+  const [showHelpModal, setShowHelpModal] = useState(false);
   
   // New state to track return flow
   const [draftTitle, setDraftTitle] = useState('');
@@ -754,8 +801,8 @@ const NeuroFlowApp = () => {
   const [deleteTarget, setDeleteTarget] = useState(null);
 
   const timerRef = useRef(null);
-
-  // --- Auth & Data Loading ---
+  
+  // ... [Auth, Data Loading, Saving, Calendar, Timer, Logic, etc. preserved] ...
   useEffect(() => {
       if (!auth) return;
       const initAuth = async () => {
@@ -789,7 +836,6 @@ const NeuroFlowApp = () => {
       return () => unsubscribe();
   }, []);
 
-  // --- Data Saving (Debounced) ---
   useEffect(() => {
       const saveData = async () => {
           try {
@@ -808,7 +854,6 @@ const NeuroFlowApp = () => {
       return () => clearTimeout(timeout);
   }, [data, clients, user, isDarkMode]);
 
-  // --- Logic ---
   const loginWithGoogle = async () => {
       if (!auth || !provider) { alert("Firebase not configured. Check console."); return; }
       try {
@@ -889,67 +934,94 @@ const NeuroFlowApp = () => {
   };
 
   const addChild = (parentId, initialData = {}) => {
-    let targetId = parentId;
-    
-    // CASE A: Add Task from Modal (specific client requested)
-    if (targetId === null && initialData.clientId) {
-        // Look for existing node for this client
-        const existingNode = data.tasks.find(n => n.type === 'client' && n.clientId === initialData.clientId);
-        if (existingNode) {
-            // Found it, so we are actually adding a task to this existing client node
-            targetId = existingNode.id;
-        }
-        // If not found, targetId remains null, meaning we create a new Client Node + Task
-    }
-
-    // CASE B: Generic Add (Central Button) - No specific client
-    // We want to find the next available client
-    if (targetId === null && !initialData.clientId) {
-         const usedClientIds = data.tasks.filter(t => t.type === 'client').map(t => t.clientId);
-         const nextClient = clients.find(c => !usedClientIds.includes(c.id));
-         
-         if (nextClient) {
-             // We found an unused client. We will create a new Client Node for them.
-             // We inject the clientId into initialData so the creation logic below picks it up
-             initialData.clientId = nextClient.id; 
-         } else {
-             // No unused clients. Open manager.
-             setShowClientManager(true);
-             return;
-         }
-    }
-    
-    const isRootAdd = targetId === null;
-    const newNode = {
-      id: generateId(), 
-      text: initialData.text || '', 
-      type: isRootAdd ? 'client' : 'task', 
-      completed: false, 
-      expanded: true, 
-      timeSpent: 0, 
-      sessions: [],
-      createdAt: new Date().toISOString(), 
-      clientId: isRootAdd ? (initialData.clientId || clients[0].id) : null, 
-      children: []
-    };
-
-    if (isRootAdd) {
-        if (initialData.text) {
-             newNode.children = [{ id: generateId(), text: initialData.text, type: 'task', completed: false, expanded: true, timeSpent: 0, sessions: [], createdAt: new Date().toISOString(), children: [] }];
-        } else {
-             newNode.children.push({ id: generateId(), text: '', type: 'task', completed: false, expanded: true, timeSpent: 0, sessions: [], createdAt: new Date().toISOString(), children: [] });
-        }
-        setData(prev => ({ ...prev, tasks: [...(prev.tasks || []), newNode] }));
-    } else {
-      const taskNode = isRootAdd ? null : {
-          id: generateId(), text: initialData.text || '', type: 'task', completed: false, expanded: true, timeSpent: 0, sessions: [], createdAt: new Date().toISOString(), children: []
-      };
-      const addRecursive = (nodes) => nodes.map(node => {
-          if (node.id === targetId) return { ...node, expanded: true, children: [...node.children, taskNode || newNode] };
+    // CASE 1: Adding a Sub-Task (Parent is known)
+    if (parentId !== null) {
+        const newNode = {
+            id: generateId(), 
+            text: initialData.text || '', 
+            type: 'task', 
+            completed: false, 
+            expanded: true, 
+            timeSpent: 0, 
+            sessions: [], 
+            createdAt: new Date().toISOString(),
+            children: []
+        };
+        const addRecursive = (nodes) => nodes.map(node => {
+          if (node.id === parentId) return { ...node, expanded: true, children: [...node.children, newNode] };
           if (node.children) return { ...node, children: addRecursive(node.children) };
           return node;
-      });
-      setData(prev => ({ ...prev, tasks: addRecursive(prev.tasks || []) }));
+        });
+        setData(prev => ({ ...prev, tasks: addRecursive(prev.tasks || []) }));
+        return;
+    }
+
+    // CASE 2: Adding a Root Node (Parent is null)
+    
+    // 2A. Specific Client Requested (e.g. from Add Task Modal)
+    if (initialData.clientId) {
+        const existingNode = data.tasks.find(n => n.type === 'client' && n.clientId === initialData.clientId);
+        
+        if (existingNode) {
+            // Append task to existing client node
+            const newTask = {
+                 id: generateId(), 
+                 text: initialData.text || '', 
+                 type: 'task', 
+                 completed: false, 
+                 expanded: true, 
+                 timeSpent: 0, 
+                 sessions: [], 
+                 createdAt: new Date().toISOString(),
+                 children: []
+            };
+            const addRecursive = (nodes) => nodes.map(node => {
+                if (node.id === existingNode.id) return { ...node, expanded: true, children: [...node.children, newTask] };
+                return node;
+            });
+            setData(prev => ({ ...prev, tasks: addRecursive(prev.tasks || []) }));
+        } else {
+            // Create new client node with the task
+             const newClientNode = {
+                id: generateId(), 
+                text: '', 
+                type: 'client', 
+                completed: false, 
+                expanded: true, 
+                timeSpent: 0, 
+                sessions: [], 
+                clientId: initialData.clientId, 
+                children: [
+                    { id: generateId(), text: initialData.text || '', type: 'task', completed: false, expanded: true, timeSpent: 0, sessions: [], createdAt: new Date().toISOString(), children: [] }
+                ]
+            };
+            setData(prev => ({ ...prev, tasks: [...(prev.tasks || []), newClientNode] }));
+        }
+        return;
+    }
+
+    // 2B. Generic Add (Central Hub Button) - "Next Available Client" Logic
+    // We strictly look for the next unused client. We DO NOT default to index 0.
+    const usedClientIds = data.tasks.filter(t => t.type === 'client').map(t => t.clientId);
+    const nextClient = clients.find(c => !usedClientIds.includes(c.id));
+
+    if (nextClient) {
+         // Create new Client Node (Empty, ready for input)
+         const newClientNode = {
+            id: generateId(), 
+            text: '', 
+            type: 'client', 
+            completed: false, 
+            expanded: true, 
+            timeSpent: 0, 
+            sessions: [], 
+            clientId: nextClient.id, 
+            children: [] 
+        };
+        setData(prev => ({ ...prev, tasks: [...(prev.tasks || []), newClientNode] }));
+    } else {
+        // No unused clients left (or list empty) -> Open Manager
+        setShowClientManager(true);
     }
   };
 
@@ -1055,7 +1127,7 @@ const NeuroFlowApp = () => {
       <div className="absolute inset-0 z-0 opacity-[0.04] pointer-events-none" style={{ backgroundImage: 'radial-gradient(circle, #888 1.5px, transparent 1.5px)', backgroundSize: '24px 24px', transform: viewMode==='map' ? `translate(${view.x}px, ${view.y}px) scale(${view.scale})` : 'none' }}></div>
       
       {/* Title Bar */}
-      <TitleBar user={user} isDarkMode={isDarkMode} loginWithGoogle={loginWithGoogle} logout={() => { signOut(auth); setUser(null); }} />
+      <TitleBar user={user} isDarkMode={isDarkMode} loginWithGoogle={loginWithGoogle} logout={() => { signOut(auth); setUser(null); }} onShowHelp={() => setShowHelpModal(true)} />
 
       {/* Top Right Controls */}
       <div className="absolute top-16 right-6 z-[90] flex flex-col gap-3" onMouseDown={e => e.stopPropagation()} onTouchStart={e => e.stopPropagation()}>
@@ -1159,6 +1231,7 @@ const NeuroFlowApp = () => {
       <ClientManagerModal isOpen={showClientManager} onClose={handleClientManagerClose} clients={clients} setClients={setClients} isDarkMode={isDarkMode} />
 
       {inspectedNode && <InspectorPanel node={inspectedNode} onUpdate={updateNode} onDelete={deleteNode} isDarkMode={isDarkMode} clients={clients} onExportCalendar={exportToCalendar} onClose={() => setInspectedNode(null)} />}
+      <HelpModal isOpen={showHelpModal} onClose={() => setShowHelpModal(false)} isDarkMode={isDarkMode} />
       
       {deleteTarget && (
         <div 
